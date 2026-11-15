@@ -739,6 +739,8 @@ One generation call per platform, text model, JSON output, built from: channel p
 - `{credit_block}` is built from the preset's `credit_fields`.
 - A line whose built-in variable is empty is dropped, along with a heading that would be left alone (for example `CHAPTERS`). An empty variable inside a title is removed with its adjoining separator.
 - The writer model returns slot values and a hook choice, never the assembled template. Code assembles the text. This keeps claims out of free text as far as possible (D10).
+- As built (Phase 1 step 6, `services/packaging.py`): code first builds every title candidate (each pattern, once per eligible hook where it uses `{hook}`) and sends them to the writer with the confirmed facts, effective research, a timeline summary, the eligible hooks and the claim phrases that may not be used. One Claude call (structured output, `WriterOut`) returns the slot values, a claim-free phrase for `{hook}` when no hook is eligible, the recommended candidate id, a why and goal per candidate, tags, hashtags, `opening_5s`, `pinned_comment`, `community_post` and thumbnail frames and prompt. Code renders titles, the description, chapters and the credit block; thumbnail words come only from eligible hooks and the preset (the writer's words are used only when there are none). Measured on Gate Keeper: 3.8k tokens in, 2k out, 22 s, about $0.05.
+- Fields are stored on one `package` row per video and platform; each run bumps `version`. Rule dismissals and `edited_fields` survive regeneration.
 
 **YouTube long-form fields**
 
@@ -794,7 +796,7 @@ Pure Python, deterministic, no LLM. Runs after every generation and every manual
 | `link_back` | Short-form packages include the full-video, playlist or channel reference | block (TikTok: warn, until its conventions exist) |
 | `length_limits` | Per-platform character limits from a config table (verify limits at build time) | block |
 
-Preset `claim_rules` are evaluated by `claim_needs_fact`. Match phrases case-insensitively on word boundaries.
+Preset `claim_rules` are evaluated by `claim_needs_fact`. Match phrases case-insensitively on word boundaries. As built, `claim_needs_fact` also checks the description (written from slots), since a slot could carry a claim. `canonical_spelling` rewrites any spelling of the researched name (case, spaces, hyphens) to the canonical one. Auto-fixes report `fixed: true` with what changed; `length_limits` uses title 100, description 5,000 and tags 500 characters (tags counted with separators, a tag with a space as if quoted).
 
 Not rules:
 
@@ -883,9 +885,9 @@ Served at the root of `http://localhost:8000`. JSON unless noted. All list endpo
 | GET | `/videos/{id}/research` | Latest results with sources and effective values |
 | PATCH | `/videos/{id}/research` | `{key, value}` sets a field override; `{key, restore: true}` clears it |
 | POST | `/videos/{id}/research/revert-spelling` | Undo the subject spelling correction |
-| POST | `/videos/{id}/packages` | `{platforms: [...], clip_id?}` → generate |
-| GET | `/videos/{id}/packages` | Latest package per platform (and per clip) |
-| PATCH | `/packages/{id}` | Manual field edit → re-run rules |
+| POST | `/videos/{id}/packages` | `{platforms: [...], clip_id?}` → generate (Phase 1: `youtube` only) |
+| GET | `/videos/{id}/packages` | Latest package per platform (and per clip), with stale state, plus whether generation is possible and which required facts are missing |
+| PATCH | `/packages/{id}` | Manual field edit → re-run rules; or dismiss / undismiss a warning |
 | POST | `/packages/{id}/regenerate` | `{field}` or `{all: true, replace_edits: false}` |
 | GET | `/videos/{id}/export.md` | Markdown export of all packages |
 | GET | `/library` · POST · PATCH · DELETE | Past uploads |
@@ -1108,7 +1110,7 @@ The original plan for this phase, kept for reference:
 
 **Phase 1 — Understand and package**
 
-Status on 2026-11-15: steps 1 to 5 are built (step 4: event editing with undo, review mode, facts confirmation; schema version 3 adds `event.edited`. Step 5: subject research with sources, overrides, spelling correction and the paste fallback). Not yet built from those steps: `PUT /config/channel` and the preset write endpoints (the preset editor is Phase 3). The API payloads are in `api/API_SHAPES.md`.
+Status on 2026-11-15: steps 1 to 6 are built (step 4: event editing with undo, review mode, facts confirmation; schema version 3 adds `event.edited`. Step 5: subject research with sources, overrides, spelling correction and the paste fallback. Step 6: the YouTube long-form package, template variables, the rules engine, the package panel and drawer, Markdown export). Not yet built from those steps: `PUT /config/channel` and the preset write endpoints (the preset editor is Phase 3). The API payloads are in `api/API_SHAPES.md`.
 
 Build in this order; each step is usable on its own.
 

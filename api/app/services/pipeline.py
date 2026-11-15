@@ -1,4 +1,4 @@
-"""Import and analysis jobs, and how their results are stored (BUILD_SPEC 7.1, 7.2, 7.3, 7.12)."""
+"""Import, analysis, research and package jobs, and how their results are stored (BUILD_SPEC 7)."""
 
 import asyncio
 import logging
@@ -11,7 +11,19 @@ from sqlalchemy import Engine
 from sqlmodel import Session, col, delete, select
 
 from app.db import session
-from app.models import Analysis, Clip, Event, Fact, IntensitySample, LLMCall, Segment, Video
+from app.models import (
+    Analysis,
+    Clip,
+    Event,
+    Fact,
+    IntensitySample,
+    LLMCall,
+    Package,
+    Segment,
+    Video,
+    utc_now,
+)
+from app.services import packaging
 from app.services.analysis import AnalysisRun, VideoContext
 from app.services.events import DetectionContext, MergedEvent, build_detectors, run_engine
 from app.services.events.base import CallRecord
@@ -426,6 +438,78 @@ async def research_job(ctx: JobContext) -> None:
         s.commit()
     found = sum(f["value"] is not None for f in payload["fields"].values())
     ctx.progress(1.0, f"Found {found} of {len(payload['fields'])} fields")
+
+
+# ---- packaging --------------------------------------------------------------------
+
+
+async def package_job(ctx: JobContext) -> None:
+    """Generate (or regenerate) the YouTube long-form package (7.8): one writer call, then code and rules.
+
+    Options: `field` regenerates that one field; `replace_edits` lets a full run overwrite the
+    user's manual edits (kept by default).
+    """
+    deps = deps_of(ctx)
+    settings = deps.settings
+    provider = deps.text_provider()
+    if provider is None:
+        raise RuntimeError("Set ANTHROPIC_API_KEY in .env to write packages")
+    with session(ctx.engine) as s:
+        video = s.get(Video, ctx.video_id)
+        if video is None:
+            return
+        preset, _note = preset_for(settings, video.preset_id)
+        channel, _errors = load_channel(settings.config_dir)
+        inp = packaging.gather(s, video, preset, channel)
+        s.commit()
+    missing = packaging.missing_required(preset, inp.fact_rows)
+    if missing:
+        raise RuntimeError(f"Confirm {', '.join(missing)} before generating the package")
+
+    ctx.progress(0.1, "Writing the package")
+    hooks = packaging.eligible_hooks(inp)
+    candidates = packaging.title_candidates(inp, hooks)
+    prompt = packaging.writer_prompt(inp, candidates, hooks)
+    try:
+        result = await provider.generate_json(prompt, packaging.WriterOut, effort="medium")
+    except LLMError:
+        _log_call(ctx, "package_youtube", prompt, getattr(provider, "model", ""), {}, 0.0, "error")
+        raise
+    _log_call(ctx, "package_youtube", prompt, result.model, result.usage, result.latency_s)
+    fresh = packaging.assemble(inp, result.parsed, candidates, hooks)
+
+    ctx.progress(0.85, "Checking the rules")
+    only = ctx.options.get("field")
+    replace_edits = bool(ctx.options.get("replace_edits"))
+    with session(ctx.engine) as s:
+        pkg = s.exec(select(Package).where(
+            Package.video_id == ctx.video_id, Package.platform == "youtube", Package.clip_id == None,
+        )).first()
+        if pkg is None:
+            pkg = Package(video_id=ctx.video_id, platform="youtube", version=0)
+        old = dict(pkg.fields or {})
+        edited = list(pkg.edited_fields or [])
+        if only:
+            fields = old | {k: v for k, v in fresh.items() if k == only or (only == "title" and k.startswith("title_"))}
+            if only == "chapters":
+                fields["chapter_list"] = fresh["chapter_list"]
+            edited = [e for e in edited if e != only]
+        elif replace_edits or not old:
+            fields, edited = fresh, []
+        else:
+            fields = fresh | {k: old[k] for k in edited if k in old}
+            if "chapters" in edited and "chapter_list" in old:
+                fields["chapter_list"] = old["chapter_list"]
+        fields, results = packaging.run_rules(inp, fields, pkg.rule_results)
+        fields = packaging.remember_generated(fields, old, edited)
+        pkg.fields, pkg.rule_results, pkg.edited_fields = fields, results, edited
+        pkg.inputs_hash = packaging.inputs_hash(inp)
+        pkg.version = (pkg.version or 0) + 1
+        pkg.created_at = utc_now()
+        s.add(pkg)
+        s.commit()
+        blocks = sum(r["severity"] == "block" for r in results)
+    ctx.progress(1.0, f"Package v{pkg.version} ready" + (f" · {blocks} blocked" if blocks else ""))
 
 
 # ---- payloads ---------------------------------------------------------------------

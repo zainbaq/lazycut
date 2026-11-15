@@ -144,6 +144,7 @@ function jobTitle(job: Job): string {
   if (job.kind === "import") return "Import failed";
   if (job.kind === "analysis") return "Analysis failed";
   if (job.kind === "research") return "Research failed";
+  if (job.kind === "package") return "Writing the package failed";
   return `${job.kind} failed`;
 }
 
@@ -304,7 +305,7 @@ export function Workspace({ id }: { id: string }) {
             )}
           </main>
           <PackagePanel
-            videoId={id}
+            video={v}
             preset={preset}
             facts={facts.data}
             factsLoading={ready && facts.isLoading}

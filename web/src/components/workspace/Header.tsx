@@ -9,8 +9,8 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { StatusPill } from "@/components/ui/StatusPill";
-import { ApiError } from "@/lib/api";
-import { useAnalyze, useDeleteVideo, useUpdateVideo } from "@/lib/queries";
+import { ApiError, exportUrl } from "@/lib/api";
+import { useAnalyze, useDeleteVideo, usePackages, useUpdateVideo } from "@/lib/queries";
 import type { Fact, Preset, Timeline, Video } from "@/lib/types";
 
 import { EventGlyph } from "./glyphs";
@@ -87,8 +87,11 @@ export function Header({
 
   const activePreset = presets.find((p) => p.id === video.preset_id);
   const targetPreset = dialog?.presetId ? presets.find((p) => p.id === dialog.presetId) : undefined;
-  // Research runs beside import and analysis and does not change the video's status (API_SHAPES).
-  const busyJob = video.jobs.find((j) => j.kind !== "research" && (j.status === "running" || j.status === "queued")) ?? null;
+  // Research and packaging run beside import and analysis and do not change the video's status (API_SHAPES).
+  const busyJob =
+    video.jobs.find((j) => (j.kind === "import" || j.kind === "analysis") && (j.status === "running" || j.status === "queued")) ?? null;
+  const packages = usePackages(video.id, video.status === "ready");
+  const hasPackage = !!packages.data?.packages.some((p) => p.platform === "youtube");
   const importing = video.status !== "ready";
   const crumb = [video.subject, video.topic].filter(Boolean).join(" · ") || video.title;
 
@@ -203,10 +206,19 @@ export function Header({
               <Send aria-hidden="true" size={14} />
               Mark as published
             </Dropdown.Item>
-            <Dropdown.Item className={menuItem} disabled>
-              <FileDown aria-hidden="true" size={14} />
-              Export Markdown
-            </Dropdown.Item>
+            {hasPackage ? (
+              <Dropdown.Item className={menuItem} asChild>
+                <a href={exportUrl(video.id)} download>
+                  <FileDown aria-hidden="true" size={14} />
+                  Export Markdown
+                </a>
+              </Dropdown.Item>
+            ) : (
+              <Dropdown.Item className={menuItem} disabled title="Generate the package first">
+                <FileDown aria-hidden="true" size={14} />
+                Export Markdown
+              </Dropdown.Item>
+            )}
             <Dropdown.Separator className="my-1 h-px bg-line2" />
             <Dropdown.Item className={menuItem} onSelect={() => setDeleteOpen(true)}>
               <Trash2 aria-hidden="true" size={14} className="text-accentsoft" />

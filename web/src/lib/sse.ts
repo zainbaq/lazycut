@@ -5,7 +5,7 @@ import { useEffect, useRef } from "react";
 
 import { apiUrl } from "./api";
 import { keys, mergeJob } from "./queries";
-import type { Job, Research, Timeline, TimelineEvent, Video } from "./types";
+import type { Job, PackageList, Research, Timeline, TimelineEvent, Video } from "./types";
 
 /** Model events the server replaces on re-analysis (7.12), unless the user chose to discard everything. */
 export function replaceable(e: TimelineEvent): boolean {
@@ -43,6 +43,9 @@ export function useVideoUpdates(videoId: string, ready: boolean) {
       if (job.kind === "research" && (job.status === "queued" || job.status === "running")) {
         qc.setQueryData<Research>(keys.research(videoId), (r) => (r && !r.running ? { ...r, running: true } : r));
       }
+      if (job.kind === "package" && (job.status === "queued" || job.status === "running")) {
+        qc.setQueryData<PackageList>(keys.packages(videoId), (p) => (p && !p.running ? { ...p, running: true } : p));
+      }
     };
     const onFinished = (e: MessageEvent<string>) => {
       onJob(e);
@@ -54,6 +57,8 @@ export function useVideoUpdates(videoId: string, ready: boolean) {
       if (job.kind === "import") void qc.invalidateQueries({ queryKey: keys.frames(videoId) });
       // Research results, and the subject if its spelling was corrected (7.7). Import may queue research.
       if (job.kind === "research" || job.kind === "import") void qc.invalidateQueries({ queryKey: keys.research(videoId) });
+      // A new package, or new facts, events or research that make the current one stale.
+      void qc.invalidateQueries({ queryKey: keys.packages(videoId) });
     };
     const onEvent = (e: MessageEvent<string>) => {
       const event = JSON.parse(e.data) as TimelineEvent;
@@ -84,6 +89,7 @@ export function useVideoUpdates(videoId: string, ready: boolean) {
         void qc.invalidateQueries({ queryKey: keys.video(videoId) });
         void qc.invalidateQueries({ queryKey: keys.timeline(videoId) });
         void qc.invalidateQueries({ queryKey: keys.research(videoId) });
+        void qc.invalidateQueries({ queryKey: keys.packages(videoId) });
       }
     };
     return () => source.close();

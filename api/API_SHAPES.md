@@ -1,4 +1,4 @@
-# API shapes (Phase 1, steps 1 to 5)
+# API shapes (Phase 1, steps 1 to 6)
 
 The JSON the web app relies on. `BUILD_SPEC.md` section 8 lists the endpoints; this file fixes
 their payloads. All times are float seconds. Errors are `{"detail": "message"}` with a 4xx/5xx code.
@@ -34,7 +34,7 @@ Video = {
   jobs: [Job],                                               // latest job of each kind
   media_url: "/videos/{id}/media"
 }
-Job = {id, video_id, kind: "import"|"analysis"|"research", status: "queued"|"running"|"done"|"error",
+Job = {id, video_id, kind: "import"|"analysis"|"research"|"package", status: "queued"|"running"|"done"|"error",
        progress: 0..1, message: str|null, error: str|null, created_at, updated_at}
 ```
 
@@ -153,6 +153,62 @@ Source = {url, title, domain, rating: "credible"|"unrated"}
   wrong type (bool fields take true/false). Works without a key, so values can be typed in by hand.
 - `POST /videos/{id}/research/revert-spelling` → `Research`: puts the user's spelling back and keeps
   it on later runs. 409 when there is no correction.
+
+## Packages (Phase 1 step 6: YouTube long-form)
+
+`GET /videos/{id}/packages` →
+```
+{
+  can_write: bool,                 // an Anthropic key is set
+  missing_facts: [label],          // required facts not confirmed yet; generation is blocked until empty
+  can_generate: bool,
+  running: bool,                   // a package job is queued or running
+  packages: [Package]              // today at most one: platform "youtube"
+}
+Package = {
+  id, video_id, clip_id: null, platform: "youtube", version: int, created_at,
+  fields: PackageFields, edited_fields: [field name], rule_results: [RuleResult],
+  inputs_hash, stale: bool,        // facts, research, events, preset or channel changed since generation
+  blocked_fields: [field path],    // fields with a block: disable Copy for them
+  counts: {block: int, warn: int}  // open (not dismissed) checks
+}
+PackageFields = {
+  title, title_why, title_goal: Goal, title_hook_id: str|null,
+  title_alternates: [{text, why, goal: Goal, hook_id: str|null}],   // up to 4
+  hook_line, description,          // description is the rendered template, ready to paste
+  chapters: str,                   // "0:00 Label" lines, "" when the video has fewer than 3 valid sections
+  chapter_list: [{t, label}],
+  tags: [str], hashtags: [str],    // hashtags already trimmed to the channel's count, each "#Word"
+  credit_block: str,
+  opening_5s: str, pinned_comment: str, community_post: str,
+  end_screen_target: {kind: "past_upload"|"playlist"|"none", title: str|null, url: str|null, label: str},
+  thumbnail: {frame_ts: [float], word_options: [str], text_style: str|null, prompt: str},
+  checklist: [{item, detail}],
+  slots: {name: text}, goals: {field: Goal}
+}
+Goal = "click_through"|"retention"|"session_watch_time"|"engagement"|"funnel"
+RuleResult = {key, rule_id, severity: "pass"|"warn"|"block", field, message, evidence, fixed: bool, dismissed: bool}
+```
+Rule ids: `canonical_spelling`, `hashtag_count`, `banned_tags` (these auto-fix; `fixed: true` says what changed),
+`claim_needs_fact.<claim rule id>`, `number_needs_fact`, `search_first_title`, `chapters_valid`, `tags_count`,
+`cannibalization`, `length_limits`. `field` is a path such as `title`, `title_alternates[1]`,
+`thumbnail.word_options[0]`, `description`, `tags`.
+
+- `POST /videos/{id}/packages` body `{platforms: ["youtube"]}` → 202 `Job` (kind `package`). 409 with no
+  Anthropic key, with unconfirmed required facts (the message names them), or while one runs. 422 for
+  other platforms (short-form comes with clips in Phase 2). One Claude call per run.
+- `PATCH /packages/{id}` body `{field, value}` edits one of `title, description, hook_line, tags, hashtags,
+  pinned_comment, community_post, opening_5s, chapters` (tags/hashtags take a list, or a comma/space-separated
+  string; chapters take "m:ss Label" lines) → `Package`; the field joins `edited_fields` and the rules re-run.
+  Body `{dismiss: key}` / `{undismiss: key}` dismisses a current warning (blocks cannot be dismissed).
+  To use an alternate title, PATCH `title` with its text: the title takes that alternate's why, goal and
+  hook. Sending a field's generated text back (kept in `fields.generated`) removes it from
+  `edited_fields`, and for the title restores its why, goal and hook. Any other title gets the why "Your own title".
+  A passing `claim_needs_fact` result carries `evidence: {phrase, requires}` (the phrase it backed).
+- `POST /packages/{id}/regenerate` body `{field}` (that field only, its edit is replaced) or
+  `{all: true, replace_edits: false}` (edited fields kept unless `replace_edits`) → 202 `Job`.
+- `GET /videos/{id}/export.md` → the package as Markdown, as a download named
+  `{Channel}_{Topic}_{Subject}_YouTube_SEO.md` (spaces and `< > : " / \ | ? *` removed). 404 before generation.
 
 ## Analysis and jobs
 

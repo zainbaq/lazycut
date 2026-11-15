@@ -10,6 +10,10 @@ import type {
   Job,
   NewEvent,
   NewVideo,
+  Package,
+  PackageEdit,
+  PackageList,
+  PackageRegenerate,
   Preset,
   Research,
   ResearchEdit,
@@ -94,7 +98,20 @@ export const api = {
   editResearchField: (id: string, body: ResearchEdit) =>
     request<Research>(`/videos/${id}/research`, { method: "PATCH", ...json(body) }),
   revertSpelling: (id: string) => request<Research>(`/videos/${id}/research/revert-spelling`, { method: "POST" }),
+  packages: (id: string) => request<PackageList>(`/videos/${id}/packages`),
+  /** A paid Claude call. */
+  generatePackage: (id: string) =>
+    request<Job>(`/videos/${id}/packages`, { method: "POST", ...json({ platforms: ["youtube"] }) }),
+  editPackage: (id: string, body: PackageEdit) => request<Package>(`/packages/${id}`, { method: "PATCH", ...json(body) }),
+  /** A paid Claude call. */
+  regeneratePackage: (id: string, body: PackageRegenerate) =>
+    request<Job>(`/packages/${id}/regenerate`, { method: "POST", ...json(body) }),
 };
+
+/** The package as Markdown, served as a download. */
+export function exportUrl(videoId: string): string {
+  return apiUrl(`/videos/${videoId}/export.md`);
+}
 
 export function frameUrl(videoId: string, t: number, w = 480): string {
   return apiUrl(`/videos/${videoId}/frame?t=${t.toFixed(2)}&w=${w}`);

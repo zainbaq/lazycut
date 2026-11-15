@@ -3,7 +3,19 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api } from "./api";
-import type { Fact, FactUpdate, Job, NewVideo, Research, ResearchEdit, ResearchRun, Video } from "./types";
+import type {
+  Fact,
+  FactUpdate,
+  Job,
+  NewVideo,
+  PackageEdit,
+  PackageList,
+  PackageRegenerate,
+  Research,
+  ResearchEdit,
+  ResearchRun,
+  Video,
+} from "./types";
 
 export const keys = {
   configStatus: ["config-status"] as const,
@@ -15,6 +27,7 @@ export const keys = {
   facts: (id: string) => ["facts", id] as const,
   frames: (id: string) => ["frames", id] as const,
   research: (id: string) => ["research", id] as const,
+  packages: (id: string) => ["packages", id] as const,
 };
 
 export const useConfigStatus = () =>
@@ -116,7 +129,10 @@ export function useEditResearchField(videoId: string) {
     onError: (_err, _vars, context) => {
       if (context?.before) qc.setQueryData(keys.research(videoId), context.before);
     },
-    onSuccess: (research) => qc.setQueryData(keys.research(videoId), research),
+    onSuccess: (research) => {
+      qc.setQueryData(keys.research(videoId), research);
+      invalidatePackages(qc, videoId);
+    },
   });
 }
 
@@ -129,8 +145,56 @@ export function useRevertSpelling(videoId: string) {
       qc.setQueryData(keys.research(videoId), research);
       void qc.invalidateQueries({ queryKey: keys.video(videoId) });
       void qc.invalidateQueries({ queryKey: keys.videos });
+      invalidatePackages(qc, videoId);
     },
   });
+}
+
+/** The package list for one video. Facts, events and research change whether it is stale, so it is
+ * refetched whenever they change (see `invalidatePackages`). */
+export const usePackages = (id: string, ready: boolean) =>
+  useQuery({ queryKey: keys.packages(id), queryFn: () => api.packages(id), enabled: ready });
+
+/** Start writing the package: a paid Claude call. */
+export function useGeneratePackage(videoId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.generatePackage(videoId),
+    onSuccess: (job) => {
+      qc.setQueryData<Video>(keys.video(videoId), (v) => mergeJob(v, job));
+      qc.setQueryData<PackageList>(keys.packages(videoId), (p) => (p ? { ...p, running: true } : p));
+    },
+  });
+}
+
+/** Regenerate one field, or all of them: a paid Claude call. */
+export function useRegeneratePackage(videoId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: PackageRegenerate }) => api.regeneratePackage(id, body),
+    onSuccess: (job) => {
+      qc.setQueryData<Video>(keys.video(videoId), (v) => mergeJob(v, job));
+      qc.setQueryData<PackageList>(keys.packages(videoId), (p) => (p ? { ...p, running: true } : p));
+    },
+  });
+}
+
+/** Edit a field or dismiss a warning; the server re-runs the rules and returns the package. */
+export function useEditPackage(videoId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: PackageEdit }) => api.editPackage(id, body),
+    onSuccess: (pkg) => {
+      qc.setQueryData<PackageList>(keys.packages(videoId), (p) =>
+        p ? { ...p, packages: p.packages.map((x) => (x.id === pkg.id ? pkg : x)) } : p,
+      );
+    },
+  });
+}
+
+/** Facts, events and research feed the package's stale check (BUILD_SPEC 4). */
+export function invalidatePackages(qc: ReturnType<typeof useQueryClient>, videoId: string) {
+  void qc.invalidateQueries({ queryKey: keys.packages(videoId) });
 }
 
 export function useAnalyze(videoId: string) {
@@ -158,6 +222,7 @@ export function useUpdateVideo(videoId: string) {
       void qc.invalidateQueries({ queryKey: keys.timeline(videoId) });
       void qc.invalidateQueries({ queryKey: keys.facts(videoId) });
       void qc.invalidateQueries({ queryKey: keys.videos });
+      invalidatePackages(qc, videoId);
     },
   });
 }
@@ -192,6 +257,7 @@ export function useUpdateFact(videoId: string) {
       qc.setQueryData<Fact[]>(keys.facts(videoId), (facts) => facts?.map((f) => (f.id === fact.id ? { ...f, ...fact } : f)));
       void qc.invalidateQueries({ queryKey: keys.video(videoId) });
       void qc.invalidateQueries({ queryKey: keys.videos });
+      invalidatePackages(qc, videoId); // missing facts and the stale check
     },
   });
 }

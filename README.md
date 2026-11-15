@@ -4,7 +4,8 @@ A local, single-user app that turns one video into a complete publishing package
 See [BUILD_SPEC.md](BUILD_SPEC.md) for the full design.
 
 **Status:** Phase 1 in progress. Import, analysis, the workspace timeline, event editing with
-review mode, facts confirmation and subject research work; packaging comes next (BUILD_SPEC section 10).
+review mode, facts confirmation, subject research and the YouTube long-form package (rule-checked,
+exportable as Markdown) work; past uploads and "Mark as published" come next (BUILD_SPEC section 10).
 
 ## Setup
 
@@ -28,7 +29,8 @@ Importing a video starts its analysis automatically when `GEMINI_API_KEY` is set
 one paid Gemini call. With `ANTHROPIC_API_KEY` set, import also researches the subject once (a
 Claude call with web search, about $0.40); later videos on the same subject reuse it. Research
 sources only count as credible when their site is listed under `credible_domains` in
-`config/channel.yaml`.
+`config/channel.yaml`. Writing the YouTube package is one Claude call (about $0.05) and needs the
+preset's required facts confirmed first.
 
 ## How events are found
 

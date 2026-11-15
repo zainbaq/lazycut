@@ -7,12 +7,14 @@ export function Switch({
   label,
   disabled,
   children,
+  className = "",
 }: {
   checked: boolean;
   onChange: (checked: boolean) => void;
   label?: string;
   disabled?: boolean;
   children?: React.ReactNode;
+  className?: string;
 }) {
   return (
     <button
@@ -22,7 +24,7 @@ export function Switch({
       aria-label={label}
       disabled={disabled}
       onClick={() => onChange(!checked)}
-      className="flex min-h-11 items-center gap-2 bg-transparent text-[12px] text-fg2 disabled:opacity-50"
+      className={`flex min-h-11 items-center gap-2 bg-transparent text-[12px] text-fg2 disabled:opacity-50 ${className}`}
     >
       {children}
       <span

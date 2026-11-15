@@ -1,5 +1,6 @@
 """Subject research: keys and source ratings, the Claude provider's call shape, and the API flow."""
 
+import re
 import shutil
 import time
 from pathlib import Path
@@ -136,8 +137,8 @@ def client(tmp_path, monkeypatch):
     config = tmp_path / "config"
     shutil.copytree(CONFIG, config)
     channel = (config / "channel.yaml").read_text(encoding="utf-8")
-    channel = channel.replace("credible_domains: []", "credible_domains: [fandom.com]")
-    channel = channel.replace("blocked_domains: []", "blocked_domains: [spam.io]")
+    channel = re.sub(r"(?m)^credible_domains:.*$", "credible_domains: [fandom.com]", channel)
+    channel = re.sub(r"(?m)^blocked_domains:.*$", "blocked_domains: [spam.io]", channel)
     (config / "channel.yaml").write_text(channel, encoding="utf-8")
     (tmp_path / "inbox").mkdir()
     (tmp_path / "data").mkdir()

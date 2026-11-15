@@ -64,7 +64,7 @@ export interface ImportList {
   items: ImportItem[];
 }
 
-export type JobKind = "import" | "analysis" | "research" | string;
+export type JobKind = "import" | "analysis" | "research" | "package" | string;
 export type JobStatus = "queued" | "running" | "done" | "error";
 
 export interface Job {
@@ -281,3 +281,104 @@ export interface ResearchRun {
 
 /** `PATCH /videos/{id}/research`. */
 export type ResearchEdit = { key: string; value: ResearchValue } | { key: string; restore: true };
+
+// ---- Packages (Phase 1 step 6: YouTube long-form, BUILD_SPEC 7.8, 7.9) -----------------
+
+export type Goal = "click_through" | "retention" | "session_watch_time" | "engagement" | "funnel";
+export type Severity = "pass" | "warn" | "block";
+
+export interface RuleResult {
+  /** `rule_id:field`; used to dismiss a warning. */
+  key: string;
+  rule_id: string;
+  severity: Severity;
+  /** A path such as `title`, `title_alternates[1]`, `thumbnail.word_options[0]`, `description`, `tags`. */
+  field: string;
+  message: string;
+  evidence: unknown;
+  /** An auto-fix changed the field (canonical_spelling, hashtag_count, banned_tags). */
+  fixed: boolean;
+  dismissed: boolean;
+}
+
+export interface TitleAlternate {
+  text: string;
+  why: string;
+  goal: Goal;
+  hook_id: string | null;
+}
+
+export interface PackageFields {
+  title: string;
+  title_why: string;
+  title_goal: Goal;
+  title_hook_id: string | null;
+  title_alternates: TitleAlternate[];
+  hook_line: string;
+  description: string;
+  /** "0:00 Label" lines; "" when the video has fewer than 3 valid sections. */
+  chapters: string;
+  chapter_list: { t: number; label: string }[];
+  tags: string[];
+  hashtags: string[];
+  credit_block: string;
+  opening_5s: string;
+  pinned_comment: string;
+  community_post: string;
+  end_screen_target: { kind: "past_upload" | "playlist" | "none"; title: string | null; url: string | null; label: string };
+  thumbnail: { frame_ts: number[]; word_options: string[]; text_style: string | null; prompt: string };
+  checklist: { item: string; detail: string }[];
+  slots: Record<string, string>;
+  goals: Record<string, Goal>;
+}
+
+export interface Package {
+  id: string;
+  video_id: string;
+  clip_id: string | null;
+  platform: "youtube";
+  version: number;
+  created_at: string;
+  fields: PackageFields;
+  edited_fields: string[];
+  rule_results: RuleResult[];
+  inputs_hash: string;
+  /** Facts, research, events, preset or channel changed since generation. */
+  stale: boolean;
+  /** Field paths with a block: Copy is disabled for them. */
+  blocked_fields: string[];
+  /** Open (not dismissed) checks. */
+  counts: { block: number; warn: number };
+}
+
+export interface PackageList {
+  /** An Anthropic key is set. */
+  can_write: boolean;
+  /** Required facts not confirmed yet; generation is blocked until empty. */
+  missing_facts: string[];
+  can_generate: boolean;
+  /** A package job is queued or running. */
+  running: boolean;
+  packages: Package[];
+}
+
+/** The fields a PATCH may edit. */
+export type EditableField =
+  | "title"
+  | "description"
+  | "hook_line"
+  | "tags"
+  | "hashtags"
+  | "pinned_comment"
+  | "community_post"
+  | "opening_5s"
+  | "chapters";
+
+/** `PATCH /packages/{id}`. */
+export type PackageEdit =
+  | { field: EditableField; value: string | string[] }
+  | { dismiss: string }
+  | { undismiss: string };
+
+/** `POST /packages/{id}/regenerate`. */
+export type PackageRegenerate = { field: EditableField } | { all: true; replace_edits: boolean };

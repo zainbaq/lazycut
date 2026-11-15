@@ -5,11 +5,12 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { AlertTriangle, ChevronDown, Circle, Minus, PackageOpen, Plus, ShieldCheck } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { PackageSection } from "@/components/package/PackageSection";
 import { ResearchLink } from "@/components/research/ResearchLink";
 import { Switch } from "@/components/ui/Switch";
 import { panelRise, stamp } from "@/lib/motion";
 import { useUpdateFact } from "@/lib/queries";
-import type { Fact, FactUpdate, FactValue, Preset } from "@/lib/types";
+import type { Fact, FactUpdate, FactValue, Preset, Video } from "@/lib/types";
 
 function show(value: FactValue): string {
   if (value === null || value === undefined || value === "") return "–";
@@ -291,22 +292,23 @@ function FactRow({ fact, onUpdate }: { fact: Fact; onUpdate: (body: FactUpdate) 
   );
 }
 
-/** Right panel (9.4 region 7). Phase 1 step 4: facts are confirmed here; packaging arrives later. */
+/** Right panel (9.4 region 7): facts to confirm, research, then the YouTube long-form package. */
 export function PackagePanel({
-  videoId,
+  video,
   preset,
   facts,
   factsLoading,
   factsError,
   analyzed,
 }: {
-  videoId: string;
+  video: Video;
   preset: Preset | undefined;
   facts: Fact[] | undefined;
   factsLoading: boolean;
   factsError: string | null;
   analyzed: boolean;
 }) {
+  const videoId = video.id;
   const update = useUpdateFact(videoId);
   const hasClaims = (preset?.facts ?? []).length > 0;
   const confirmed = (facts ?? []).filter((f) => f.confirmed).length;
@@ -357,13 +359,9 @@ export function PackagePanel({
         ) : null}
       </Section>
       <ResearchLink videoId={videoId} />
-      <div className="flex flex-col gap-2 rounded-[12px] border border-dashed border-line3 p-3 text-fg3">
-        <span className="flex items-center gap-2 text-[13px] font-semibold text-fg2">
-          <PackageOpen aria-hidden="true" size={14} className="text-accentsoft" />
-          Platforms, titles and rules
-        </span>
-        <span>Packages are generated once the facts are confirmed. That part of LazyCut arrives in a later step.</span>
-      </div>
+      <Section icon={<PackageOpen aria-hidden="true" size={14} className="text-accentsoft" />} title="Platforms, title and rules">
+        <PackageSection video={video} />
+      </Section>
     </aside>
   );
 }
