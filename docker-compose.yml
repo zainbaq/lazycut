@@ -1,0 +1,41 @@
+name: lazycut
+services:
+  api:
+    build: ./api
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # Docker Desktop on Windows does not pass file events into bind mounts.
+      - WATCHFILES_FORCE_POLLING=${WATCH_POLLING:-false}
+    ports: ["127.0.0.1:8000:8000"]
+    volumes:
+      - ./data:/data
+      - ./config:/config
+      - ${IMPORT_DIR:-./inbox}:/inbox:ro
+      - db:/db
+      - ./eval:/eval
+      - ./api/app:/srv/app          # dev hot reload
+      - ./api/scripts:/srv/scripts
+      - ./api/tests:/srv/tests
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /srv/app
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+  web:
+    build:
+      context: ./web
+      target: dev
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - WATCHPACK_POLLING=${WATCH_POLLING:-false}
+    ports: ["127.0.0.1:3000:3000"]
+    volumes:
+      - ./web/src:/app/src          # dev hot reload
+    depends_on:
+      api:
+        condition: service_healthy
+volumes:
+  db:

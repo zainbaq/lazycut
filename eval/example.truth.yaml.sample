@@ -1,0 +1,28 @@
+# Ground truth for one video. Copy to <name>.truth.yaml and edit.
+# The eval script scores Gemini's analysis against what you write here.
+
+video: byakue.mp4                       # file name (or sub-path) inside the import folder
+preset: boss_fight                      # boss_fight | general
+kind: long                              # long | clip
+topic: "Onimusha: Way of the Sword"
+subject: Byakue
+topic_terms: "Issen = a perfect counter that kills or staggers in one strike"
+
+# Best: one line per event with the time you see it start.
+# Times can be seconds (12.5) or clock style ("0:12.5", "1:04").
+# Event types come from the preset: counter, parry, hit_taken, boss_attack, phase_change, finisher.
+# Only the types you list are scored, so skip the ones you do not want to label.
+events:
+  - {t: "0:02.0", type: counter}
+  - {t: "0:04.5", type: counter}
+  - {t: "0:27.0", type: finisher}
+
+# If you only have a hand count for a type, give the total here instead.
+# Counts are compared, but timing cannot be scored for that type.
+counts:
+  hit_taken: 0
+
+# What the facts should come out as.
+facts:
+  hits_taken: 0
+  counter_count: 2

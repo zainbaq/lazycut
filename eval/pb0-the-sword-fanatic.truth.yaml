@@ -1,0 +1,44 @@
+# Ground truth for one video. Events confirmed on the review sheet (scripts.review_sheet).
+
+video: pb0-the-sword-fanatic.mp4
+preset: boss_fight
+kind: long
+topic: "Phantom Blade Zero"
+subject: "The Sword Fanatic"
+topic_terms: "BossFight Drunken Master"
+
+# One line per event with the time it starts. Only the types listed here or in `counts` are scored.
+events:
+  - {t: "0:40.85", type: counter}
+  - {t: "0:50.60", type: hit_taken}
+  - {t: "0:54.60", type: hit_taken}
+  - {t: "0:59.25", type: hit_taken}
+  - {t: "1:12.40", type: hit_taken}
+  - {t: "1:26.90", type: hit_taken}
+  - {t: "1:38.60", type: hit_taken}
+  - {t: "1:49.80", type: hit_taken}
+  - {t: "2:01.00", type: hit_taken}
+  - {t: "2:09.90", type: hit_taken}
+  - {t: "2:15.35", type: hit_taken}
+  - {t: "2:16.40", type: counter}
+  - {t: "2:28.30", type: hit_taken}
+  - {t: "2:37.20", type: counter}
+  - {t: "2:43.15", type: counter}
+  - {t: "2:44.20", type: counter}
+  - {t: "3:04.70", type: counter}
+  - {t: "3:25.50", type: hit_taken}
+  - {t: "3:26.90", type: hit_taken}
+  - {t: "3:30.90", type: finisher}
+
+# Confirmed on review but not scored, because that type was not reviewed in full:
+#   0:59.00 boss_attack
+#   1:16.25 parry
+
+# Types that were reviewed and never happen, or that only have a hand count.
+counts:
+  phase_change: 0
+
+# What the facts should come out as.
+facts:
+  hits_taken: 13
+  counter_count: 6

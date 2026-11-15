@@ -1,0 +1,49 @@
+/* "Ink" design tokens (BUILD_SPEC 9.3). The only place colours are defined. */
+:root {
+  --bg: #0c0c0b;
+  --bg-raised: #111110;
+  --surface: #181715;
+  --surface-2: #211f1c;
+  --stage: #070707;
+  --stage-frame: #151412;
+  --line: #23211e;
+  --line-2: #2b2925;
+  --line-3: #3a3731;
+  --line-strong: #5a554b;
+  --text: #f2eee6;
+  --text-2: #d9d3c6;
+  --text-3: #b5aea0;
+  --text-4: #8f897c;
+  --accent: #e2452d;
+  --accent-fill: #c8381f;
+  --accent-soft: #f06a50;
+  --accent-deep: #a82c17;
+  --on-accent: #fff4ec;
+  --chip: #2a1a16;
+  --chip-on: #4a2219;
+  --chip-hover: #3a2520;
+  --chip-line: #5a2a20;
+  --gold: #d9a93f;
+  --gold-text: #e9c56a;
+  --gold-line: #6b5522;
+  --gold-chip: #241e12;
+  --ok: #8fd19e;
+  --ok-text: #a9ddb5;
+  --ok-line: #3f6b49;
+  --ok-bg: #17231a;
+  --on-ok: #0e1f12;
+  --warn: #f7c97a;
+  --warn-line: #8a6a2a;
+  --warn-chip: #251f13;
+  --paper-chip: #1c1b18;
+  --note-bg: #f2eee6;
+  --note-text: #1a1917;
+  --note-text-2: #3a3731;
+
+  --radius-panel: 12px;
+  --radius-control: 10px;
+  --radius-pill: 22px;
+  --radius-chip: 8px;
+
+  --ease-out-ink: cubic-bezier(0.2, 0.8, 0.2, 1);
+}

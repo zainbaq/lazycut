@@ -1,0 +1,14 @@
+.env
+data/
+inbox/*
+!inbox/.gitkeep
+eval/results/
+
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.venv/
+
+node_modules/
+.next/

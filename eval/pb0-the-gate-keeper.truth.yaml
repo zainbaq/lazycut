@@ -1,0 +1,48 @@
+# Ground truth for one video. Events confirmed on the review sheet (scripts.review_sheet).
+
+video: pb0-the-gate-keeper.mp4
+preset: boss_fight
+kind: long
+topic: "Phantom Blade Zero"
+subject: "The Gate Keeper"
+topic_terms: "BossFight Shield Break Guard Break"
+
+# One line per event with the time it starts. Only the types listed here or in `counts` are scored.
+events:
+  - {t: "0:10.50", type: counter}
+  - {t: "0:23.20", type: counter}
+  - {t: "0:29.00", type: hit_taken}
+  - {t: "0:35.00", type: finisher}
+  - {t: "0:58.65", type: hit_taken}
+  - {t: "1:03.60", type: hit_taken}
+  - {t: "1:06.80", type: counter}
+  - {t: "1:07.00", type: hit_taken}
+  - {t: "1:25.10", type: counter}
+  - {t: "1:30.10", type: hit_taken}
+  - {t: "1:36.70", type: hit_taken}
+  - {t: "1:41.30", type: hit_taken}
+  - {t: "1:48.65", type: counter}
+  - {t: "1:58.00", type: counter}
+  - {t: "2:08.00", type: hit_taken}
+  - {t: "2:10.25", type: finisher}
+  - {t: "2:27.20", type: hit_taken}
+  - {t: "2:29.95", type: counter}
+  - {t: "2:42.20", type: counter}
+  - {t: "2:51.50", type: counter}
+  - {t: "2:56.70", type: hit_taken}
+  - {t: "3:13.20", type: counter}
+  - {t: "3:21.10", type: hit_taken}
+  - {t: "3:27.00", type: counter}
+  - {t: "3:28.25", type: finisher}
+  - {t: "3:30.00", type: finisher}
+  - {t: "3:36.50", type: finisher}
+  - {t: "3:39.50", type: finisher}
+
+# Types that were reviewed and never happen, or that only have a hand count.
+counts:
+  phase_change: 0
+
+# What the facts should come out as.
+facts:
+  hits_taken: 11
+  counter_count: 11

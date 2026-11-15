@@ -1,0 +1,101 @@
+// Typed client for the LazyCut API (api/API_SHAPES.md). The browser calls the API directly (D18).
+
+import type {
+  ConfigStatus,
+  EventPatch,
+  Fact,
+  FactUpdate,
+  Frames,
+  ImportList,
+  Job,
+  NewEvent,
+  NewVideo,
+  Preset,
+  Research,
+  ResearchEdit,
+  ResearchRun,
+  Timeline,
+  TimelineEvent,
+  Video,
+} from "./types";
+
+export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000").replace(/\/$/, "");
+
+/** Turn a path from an API payload (`/videos/x/media`) into a full URL. */
+export function apiUrl(path: string): string {
+  if (/^https?:\/\//.test(path)) return path;
+  return `${API_URL}${path.startsWith("/") ? "" : "/"}${path}`;
+}
+
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(apiUrl(path), {
+      ...init,
+      headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    });
+  } catch {
+    throw new ApiError(`Cannot reach the API at ${API_URL}. Is the api container running?`, 0);
+  }
+  if (!res.ok) {
+    let detail = `${res.status} ${res.statusText}`;
+    try {
+      const body = await res.json();
+      if (typeof body?.detail === "string") detail = body.detail;
+      else if (Array.isArray(body?.detail)) {
+        detail = body.detail.map((d: { msg?: string }) => d.msg ?? JSON.stringify(d)).join("; ");
+      }
+    } catch {
+      // keep the status text
+    }
+    throw new ApiError(detail, res.status);
+  }
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
+}
+
+const json = (body: unknown): RequestInit => ({ body: JSON.stringify(body) });
+
+export const api = {
+  configStatus: () => request<ConfigStatus>("/config/status"),
+  presets: () => request<Preset[]>("/presets"),
+  imports: () => request<ImportList>("/imports"),
+  videos: () => request<Video[]>("/videos"),
+  video: (id: string) => request<Video>(`/videos/${id}`),
+  createVideo: (body: NewVideo) => request<Video>("/videos", { method: "POST", ...json(body) }),
+  updateVideo: (id: string, body: Partial<Pick<Video, "title" | "subject" | "topic" | "topic_terms" | "preset_id">>) =>
+    request<Video>(`/videos/${id}`, { method: "PATCH", ...json(body) }),
+  deleteVideo: (id: string) => request<void>(`/videos/${id}`, { method: "DELETE" }),
+  frames: (id: string) => request<Frames>(`/videos/${id}/frames`),
+  timeline: (id: string) => request<Timeline>(`/videos/${id}/timeline`),
+  facts: (id: string) => request<Fact[]>(`/videos/${id}/facts`),
+  createEvent: (videoId: string, body: NewEvent) =>
+    request<TimelineEvent>(`/videos/${videoId}/events`, { method: "POST", ...json(body) }),
+  updateEvent: (id: string, body: EventPatch) => request<TimelineEvent>(`/events/${id}`, { method: "PATCH", ...json(body) }),
+  deleteEvent: (id: string) => request<void>(`/events/${id}`, { method: "DELETE" }),
+  updateFact: (id: string, body: FactUpdate) => request<Fact>(`/facts/${id}`, { method: "PUT", ...json(body) }),
+  analyze: (id: string, discardUserWork: boolean) =>
+    request<Job>(`/videos/${id}/analyze`, { method: "POST", ...json({ discard_user_work: discardUserWork }) }),
+  retryJob: (id: string) => request<Job>(`/jobs/${id}/retry`, { method: "POST" }),
+  research: (id: string) => request<Research>(`/videos/${id}/research`),
+  /** A paid Claude call (web search) unless `pasted_text` is given. */
+  runResearch: (id: string, body: ResearchRun = {}) =>
+    request<Job>(`/videos/${id}/research`, { method: "POST", ...json(body) }),
+  editResearchField: (id: string, body: ResearchEdit) =>
+    request<Research>(`/videos/${id}/research`, { method: "PATCH", ...json(body) }),
+  revertSpelling: (id: string) => request<Research>(`/videos/${id}/research/revert-spelling`, { method: "POST" }),
+};
+
+export function frameUrl(videoId: string, t: number, w = 480): string {
+  return apiUrl(`/videos/${videoId}/frame?t=${t.toFixed(2)}&w=${w}`);
+}

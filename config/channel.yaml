@@ -1,0 +1,39 @@
+name: TheLazyRonin
+display_name: The Lazy Ronin
+handle: "@thelazyronin"
+tagline: "I make difficult games look easy."
+subscribe_url: "https://www.youtube.com/@thelazyronin?sub_confirmation=1"
+format: faceless
+default_preset: general
+strategy_mode: search_first        # search_first | hook_first
+playlists:
+  - {topic: "Onimusha: Way of the Sword", name: "Onimusha — All Boss Fights", url: "https://www.youtube.com/playlist?list=PLRXz5KwhnmcA"}  # id unverified by owner
+description_template: |
+  {hook_line}
+
+  {body_paragraph}
+
+  {display_name} - {tagline}
+
+  Full playlist: {playlist_url}
+  Subscribe: {subscribe_url}
+
+  CHAPTERS
+  {chapters}
+
+  {credit_block}
+
+  {hashtags}
+hashtags: {youtube: 3, shorts: 5, reels: 5, tiktok: 5}
+shorts_required_hashtag: "#Shorts"
+tags_target: 20
+thumbnail_style:
+  text_default: "white, heavy black outline"
+  avoid: "red text in fire-heavy scenes; text over faces or weapons"
+  words: "2-4 words, never repeats the title"
+vertical_safe_margins: {top_pct: 12, bottom_pct: 15}
+credible_domains: [fextralife.com, wikipedia.org]   # research sources treated as credible (subdomains count)
+blocked_domains: []                # research sources never used
+baselines:
+  reel_skip_rate_pct: 23
+  reel_share_rate_pct: 0.7

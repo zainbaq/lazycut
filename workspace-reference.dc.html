@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ink workspace with clips, preview, timeline and package</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#F2EEE6}a:hover{color:#FFFFFF}
+@keyframes strike{from{transform:scaleY(0);opacity:0}to{transform:scaleY(1);opacity:1}}
+@keyframes sweep{from{left:var(--from)}to{left:var(--to)}}
+@keyframes rise{from{transform:translateY(8px);opacity:0}to{transform:translateY(0);opacity:1}}
+@keyframes pop{0%{transform:scale(0.9);opacity:0}100%{transform:scale(1);opacity:1}}
+.ink-btn{transition:background 160ms ease,border-color 160ms ease,transform 160ms ease}
+.ink-btn:hover{background:#2B2925;border-color:#8F897C}
+.ink-btn:active{transform:scale(0.96)}
+.ink-thumb{transition:transform 200ms ease,outline-color 200ms ease}
+.ink-thumb:hover{transform:translateY(-2px)}
+.ink-chip{transition:background 160ms ease,transform 160ms ease}
+.ink-chip:hover{transform:translateY(-1px);background:#3A2520}
+.ink-row{transition:background 160ms ease}
+.ink-row:hover{background:#211F1C}
+.ink-knob{transition:left 200ms cubic-bezier(.2,.8,.2,1),background 200ms ease}
+.ink-range{transition:left 320ms cubic-bezier(.2,.8,.2,1),width 320ms cubic-bezier(.2,.8,.2,1)}
+@media (prefers-reduced-motion: reduce){*{animation:none !important;transition:none !important}}
+</style>
+</helmet>
+<div style="width: 100%; min-height: 900px; box-sizing: border-box; background: #0C0C0B; color: #F2EEE6; font-family: Inter, system-ui, sans-serif; font-size: 12px; display: flex; flex-wrap: wrap">
+<nav aria-label="Sections" style="flex: 0 0 60px; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 14px 0; background: #111110; border-right: 1px solid #23211E">
+<div aria-hidden="true" style="width: 34px; height: 34px; background: #C8381F; display: flex; align-items: center; justify-content: center; border-radius: 10px; margin-bottom: 14px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFF4EC" stroke-width="3.5" stroke-linecap="round"><path d="M5 19 19 5"></path><path d="M5 11 11 5" stroke-opacity="0.55"></path></svg></div>
+<button class="ink-btn" aria-label="Library" style="width: 44px; height: 44px; background: transparent; border: 1px solid transparent; border-radius: 10px; color: #B5AEA0; display: flex; align-items: center; justify-content: center"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="3" width="7" height="7" rx="1.5"></rect><rect x="3" y="14" width="7" height="7" rx="1.5"></rect><rect x="14" y="14" width="7" height="7" rx="1.5"></rect></svg></button>
+<button class="ink-btn" aria-label="Workspace" aria-current="page" style="width: 44px; height: 44px; background: #211F1C; border: 1px solid #E2452D; border-radius: 10px; color: #F2EEE6; display: flex; align-items: center; justify-content: center"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12"></path></svg></button>
+<button class="ink-btn" aria-label="Research" style="width: 44px; height: 44px; background: transparent; border: 1px solid transparent; border-radius: 10px; color: #B5AEA0; display: flex; align-items: center; justify-content: center"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg></button>
+<button class="ink-btn" aria-label="Thumbnail" style="width: 44px; height: 44px; background: transparent; border: 1px solid transparent; border-radius: 10px; color: #B5AEA0; display: flex; align-items: center; justify-content: center"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"></rect><circle cx="9" cy="10" r="2"></circle><path d="m21 16-5-5L5 20"></path></svg></button>
+<button class="ink-btn" aria-label="Performance" style="width: 44px; height: 44px; background: transparent; border: 1px solid transparent; border-radius: 10px; color: #B5AEA0; display: flex; align-items: center; justify-content: center"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V4M4 20h16M8 15l4-5 3 3 5-7"></path></svg></button>
+</nav>
+<div style="flex: 999 1 640px; min-width: 0; display: flex; flex-direction: column">
+<header style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 10px 18px; background: #111110; border-bottom: 1px solid #23211E">
+<nav aria-label="Breadcrumb" style="display: flex; align-items: center; gap: 8px"><a href="#home" style="text-decoration: none; padding: 14px 0">Home</a><span aria-hidden="true" style="color: #8F897C">/</span><a href="#library" style="text-decoration: none; padding: 14px 0">Library</a><span aria-hidden="true" style="color: #8F897C">/</span><span style="color: #B5AEA0">Byakue · Onimusha: Way of the Sword</span></nav>
+<div role="group" aria-label="Preset" style="display: flex; align-items: center; gap: 6px; margin-left: auto">
+<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#F06A50" stroke-width="2" stroke-linecap="round"><path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h8M16 18h4"></path><circle cx="16" cy="6" r="2"></circle><circle cx="8" cy="12" r="2"></circle><circle cx="14" cy="18" r="2"></circle></svg>
+<sc-for list="{{ presetTabs }}" as="pt" hint-placeholder-count="2"><button class="ink-btn" onClick="{{ pt.pick }}" aria-pressed="{{ pt.pressed }}" style="{{ pt.style }}">{{ pt.name }}</button></sc-for>
+</div>
+<span style="display: flex; align-items: center; gap: 6px; padding: 6px 12px; background: #17231A; border-radius: 14px; color: #A9DDB5"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"></path></svg>Analyzed</span>
+<button class="ink-btn" aria-label="More options" style="width: 44px; height: 44px; background: transparent; border: 1px solid #2B2925; border-radius: 10px; color: #F2EEE6; display: flex; align-items: center; justify-content: center"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"></circle><circle cx="12" cy="12" r="1.8"></circle><circle cx="12" cy="19" r="1.8"></circle></svg></button>
+</header>
+<div style="display: flex; flex-wrap: wrap; flex-grow: 1">
+<div style="flex: 999 1 620px; min-width: 0; display: flex; flex-direction: column">
+<div style="display: flex; flex-wrap: wrap; border-bottom: 1px solid #23211E">
+<section aria-label="Clips" style="flex: 1 1 250px; min-width: 0; display: flex; flex-direction: column; gap: 12px; padding: 16px; border-right: 1px solid #23211E">
+<div style="display: flex; align-items: center; justify-content: space-between"><span style="font-family: 'Shippori Mincho', serif; font-weight: 700; font-size: 16px">Clips</span><button class="ink-btn" aria-label="Find a clip" aria-expanded="{{ searchExpanded }}" onClick="{{ toggleSearch }}" style="width: 44px; height: 44px; margin: -10px -10px -10px 0; background: transparent; border: 1px solid transparent; border-radius: 10px; color: #F2EEE6; display: flex; align-items: center; justify-content: center"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg></button></div>
+<sc-if value="{{ searchOpen }}" hint-placeholder-val="{{ true }}"><div style="animation: rise 220ms ease both"><label for="ws-prompt" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Describe the clip you want</label><input id="ws-prompt" type="text" value="{{ promptText }}" style="width: 100%; box-sizing: border-box; min-height: 44px; padding: 0 12px; background: #181715; color: #F2EEE6; border: 1px solid #5A554B; border-radius: 10px; font-size: 12px; font-family: inherit"></div></sc-if>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px">
+<sc-for list="{{ thumbs }}" as="th" hint-placeholder-count="4"><button class="ink-thumb" onClick="{{ th.pick }}" aria-pressed="{{ th.pressed }}" aria-label="{{ th.aria }}" style="{{ th.style }}"><span aria-hidden="true" style="{{ th.ring }}"></span><span aria-hidden="true" style="{{ th.slash }}"></span><span style="position: absolute; left: 0; right: 0; bottom: 0; padding: 14px 8px 6px; display: flex; align-items: center; justify-content: space-between; color: #F2EEE6; font-size: 11px; background: rgba(7,7,7,0.72)"><span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{ th.name }}</span><span style="font-variant-numeric: tabular-nums; color: #D9D3C6">{{ th.dur }}</span></span><span aria-hidden="true" style="{{ th.bar }}"></span></button></sc-for>
+</div>
+</section>
+<section aria-label="Preview" style="flex: 999 1 380px; min-width: 0; display: flex; flex-direction: column; gap: 10px; padding: 16px">
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 12px"><span style="display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 13px">{{ clipName }}<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#B5AEA0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"></path></svg></span><button role="switch" aria-checked="{{ tallChecked }}" onClick="{{ toggleTall }}" style="min-height: 44px; padding: 0; background: transparent; border: none; color: #D9D3C6; font-family: inherit; font-size: 12px; display: flex; align-items: center; gap: 8px; cursor: pointer">9:16 crop<span aria-hidden="true" style="{{ tallTrack }}"><span class="ink-knob" style="{{ tallKnob }}"></span></span></button></div>
+<div style="position: relative; height: 300px; background: #151412; border-radius: 12px; overflow: hidden; display: flex; justify-content: center">
+<div style="{{ stageStyle }}">
+<svg role="img" aria-label="Gameplay preview placeholder drawn as an ink circle and slash" viewBox="0 0 600 300" preserveAspectRatio="xMidYMid slice" style="position: absolute; inset: 0; width: 100%; height: 100%"><circle cx="300" cy="150" r="96" fill="none" stroke="#F2EEE6" stroke-opacity="0.16" stroke-width="20" stroke-dasharray="510 90" stroke-linecap="round"></circle><path d="M190 240 420 60" stroke="#E2452D" stroke-width="9" stroke-linecap="round"></path><path d="M206 252 440 70" stroke="#E2452D" stroke-opacity="0.35" stroke-width="3" stroke-linecap="round"></path><circle cx="250" cy="182" r="13" fill="#F2EEE6" fill-opacity="0.55"></circle><circle cx="362" cy="116" r="20" fill="#F2EEE6" fill-opacity="0.25"></circle></svg>
+<div aria-hidden="true" style="position: absolute; left: 50%; top: 0; bottom: 0; border-left: 1px dashed rgba(240,106,80,0.7)"></div>
+<span style="position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); padding: 4px 10px; background: rgba(7,7,7,0.8); border: 1px solid #E2452D; border-radius: 4px; color: #F2EEE6; white-space: nowrap">{{ headLabel }}</span>
+</div>
+</div>
+<div style="display: flex; align-items: center; justify-content: space-between"><span style="font-variant-numeric: tabular-nums; color: #D9D3C6">{{ headTime }}</span>
+<div style="display: flex; align-items: center; gap: 4px">
+<button class="ink-btn" aria-label="Previous event" onClick="{{ prevEvent }}" style="width: 44px; height: 44px; background: transparent; border: 1px solid transparent; border-radius: 50%; color: #F2EEE6; display: flex; align-items: center; justify-content: center"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zM20 5v14L9 12z"></path></svg></button>
+<button class="ink-btn" aria-label="{{ playLabel }}" onClick="{{ togglePlay }}" style="width: 44px; height: 44px; background: #C8381F; border: 1px solid #C8381F; border-radius: 50%; color: #FFF4EC; display: flex; align-items: center; justify-content: center"><sc-if value="{{ paused }}" hint-placeholder-val="{{ true }}"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"></path></svg></sc-if><sc-if value="{{ playing }}" hint-placeholder-val="{{ false }}"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M7 5h4v14H7zM13 5h4v14h-4z"></path></svg></sc-if></button>
+<button class="ink-btn" aria-label="Next event" onClick="{{ nextEvent }}" style="width: 44px; height: 44px; background: transparent; border: 1px solid transparent; border-radius: 50%; color: #F2EEE6; display: flex; align-items: center; justify-content: center"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM4 5v14l11-7z"></path></svg></button>
+</div>
+<span style="font-variant-numeric: tabular-nums; color: #B5AEA0">0:32.0</span></div>
+<div aria-hidden="true" style="position: relative; height: 6px; background: #2B2925; border-radius: 3px"><span class="ink-range" style="{{ scrubFill }}"></span><span class="ink-range" style="{{ scrubKnob }}"></span></div>
+</section>
+</div>
+<section aria-label="Timeline" style="display: flex; flex-direction: column; gap: 10px; padding: 16px; flex-grow: 1">
+<div style="display: flex; align-items: center; justify-content: space-between"><span style="font-family: 'Shippori Mincho', serif; font-weight: 700; font-size: 16px">Timeline</span><span style="display: flex; align-items: center; gap: 8px; color: #B5AEA0"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5M8 11h6"></path></svg><span aria-hidden="true" style="position: relative; width: 80px; height: 4px; background: #2B2925; border-radius: 2px; display: block"><span style="position: absolute; left: 0; width: 60%; top: 0; bottom: 0; background: #8F897C; border-radius: 2px; display: block"></span><span style="position: absolute; left: 60%; top: -4px; width: 12px; height: 12px; margin-left: -6px; background: #F2EEE6; border-radius: 50%; display: block"></span></span><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5M8 11h6M11 8v6"></path></svg></span></div>
+<div style="display: flex; gap: 10px">
+<div aria-hidden="true" style="flex: 0 0 36px; display: flex; flex-direction: column; gap: 8px; padding-top: 22px; color: #B5AEA0">
+<span style="height: 30px; display: flex; align-items: center; justify-content: center; background: #181715; border-radius: 8px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-8 4 16 3-8h4"></path></svg></span>
+<span style="height: 52px; display: flex; align-items: center; justify-content: center; background: #181715; border-radius: 8px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M8 5v14M16 5v14"></path></svg></span>
+<span style="height: 36px; display: flex; align-items: center; justify-content: center; background: #181715; border-radius: 8px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 10v4M8 6v12M12 9v6M16 4v16M20 10v4"></path></svg></span>
+<span style="height: 18px; display: flex; align-items: center; justify-content: center; background: #181715; border-radius: 8px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"></path></svg></span>
+</div>
+<div style="position: relative; flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 8px">
+<div aria-hidden="true" style="position: relative; height: 14px; color: #8F897C; font-size: 10px; font-variant-numeric: tabular-nums"><sc-for list="{{ ticks }}" as="tk" hint-placeholder-count="8"><span style="{{ tk.style }}">{{ tk.label }}</span></sc-for></div>
+<div style="position: relative; height: 30px"><sc-for list="{{ chips }}" as="chip" hint-placeholder-count="8"><button class="ink-chip" onClick="{{ chip.pick }}" aria-label="{{ chip.aria }}" style="{{ chip.style }}"><span aria-hidden="true" style="{{ chip.glyph }}"></span><span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{ chip.label }}</span></button></sc-for></div>
+<div style="position: relative; height: 52px; display: flex; gap: 2px; border-radius: 8px; overflow: hidden"><sc-for list="{{ frames }}" as="fr" hint-placeholder-count="16"><span aria-hidden="true" style="{{ fr.style }}"><span style="{{ fr.slash }}"></span></span></sc-for><span class="ink-range" aria-hidden="true" style="{{ rangeStyle }}"></span></div>
+<div aria-hidden="true" style="height: 36px; display: flex; align-items: center; gap: 2px; background: #181715; border-radius: 8px; padding: 0 2px"><sc-for list="{{ bars }}" as="bar" hint-placeholder-count="64"><span style="{{ bar.style }}"></span></sc-for></div>
+<div aria-hidden="true" style="position: relative; height: 18px"><span style="position: absolute; left: 0; width: 3.1%; top: 4px; height: 10px; background: #3A3731; border-radius: 5px; display: block"></span><span style="position: absolute; left: 35.9%; width: 6.3%; top: 4px; height: 10px; background: #3A3731; border-radius: 5px; display: block"></span><span style="position: absolute; left: 46.9%; width: 15.6%; top: 4px; height: 10px; background: #3A3731; border-radius: 5px; display: block"></span></div>
+<div aria-hidden="true" style="{{ headStyle }}"></div>
+</div>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: auto; padding-top: 6px">
+<button class="ink-btn" onClick="{{ reset }}" style="min-height: 44px; padding: 0 14px; background: transparent; border: 1px solid #5A554B; border-radius: 22px; color: #F2EEE6; font-family: inherit; font-size: 12px; display: flex; align-items: center; gap: 6px"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 1 0 3-6.2M4 4v5h5"></path></svg>Reset</button>
+<div style="display: flex; flex-wrap: wrap; gap: 6px; margin: 0 auto">
+<button class="ink-btn" aria-label="Start half a second earlier" onClick="{{ startBack }}" style="min-height: 44px; padding: 0 12px; background: #181715; border: 1px solid #2B2925; border-radius: 10px; color: #F2EEE6; font-family: inherit; font-size: 12px; display: flex; align-items: center; gap: 6px"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5v14M20 12H9M13 8l-4 4 4 4"></path></svg>In earlier</button>
+<button class="ink-btn" aria-label="Start half a second later" onClick="{{ startFwd }}" style="min-height: 44px; padding: 0 12px; background: #181715; border: 1px solid #2B2925; border-radius: 10px; color: #F2EEE6; font-family: inherit; font-size: 12px; display: flex; align-items: center; gap: 6px"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5v14M8 12h11M15 8l4 4-4 4"></path></svg>In later</button>
+<button class="ink-btn" aria-label="End half a second earlier" onClick="{{ endBack }}" style="min-height: 44px; padding: 0 12px; background: #181715; border: 1px solid #2B2925; border-radius: 10px; color: #F2EEE6; font-family: inherit; font-size: 12px; display: flex; align-items: center; gap: 6px"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 5v14M16 12H5M9 8l-4 4 4 4"></path></svg>Out earlier</button>
+<button class="ink-btn" aria-label="End half a second later" onClick="{{ endFwd }}" style="min-height: 44px; padding: 0 12px; background: #181715; border: 1px solid #2B2925; border-radius: 10px; color: #F2EEE6; font-family: inherit; font-size: 12px; display: flex; align-items: center; gap: 6px"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 5v14M4 12h11M11 8l4 4-4 4"></path></svg>Out later</button>
+</div>
+<button class="ink-btn" onClick="{{ lift }}" style="{{ liftStyle }}"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"></path></svg>{{ liftText }}</button>
+</div>
+</section>
+</div>
+<aside aria-label="Package" style="flex: 1 1 300px; min-width: 0; display: flex; flex-direction: column; gap: 12px; padding: 16px; background: #111110; border-left: 1px solid #23211E">
+<span style="font-family: 'Shippori Mincho', serif; font-weight: 700; font-size: 16px">Package</span>
+<div style="background: #181715; border-radius: 12px; padding: 4px 12px">
+<button class="ink-row" onClick="{{ toggleFacts }}" aria-expanded="{{ factsExpanded }}" style="width: 100%; min-height: 44px; padding: 0; background: transparent; border: none; color: #F2EEE6; font-family: inherit; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 8px; cursor: pointer"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#F06A50" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"></path></svg>{{ factsTitle }}<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#B5AEA0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="{{ factsChev }}"><path d="m6 9 6 6 6-6"></path></svg></button>
+<sc-if value="{{ factsOpen }}" hint-placeholder-val="{{ true }}"><div style="display: flex; flex-direction: column; padding-bottom: 8px; animation: rise 200ms ease both"><sc-for list="{{ facts }}" as="row" hint-placeholder-count="2"><button role="switch" aria-checked="{{ row.checked }}" onClick="{{ row.toggle }}" style="width: 100%; min-height: 44px; padding: 0; background: transparent; border: none; color: #D9D3C6; font-family: inherit; font-size: 12px; display: flex; align-items: center; gap: 8px; cursor: pointer"><span style="text-align: left">{{ row.name }}</span><span style="margin-left: auto; color: #B5AEA0; font-size: 11px">{{ row.tail }}</span><span aria-hidden="true" style="{{ row.track }}"><span class="ink-knob" style="{{ row.knob }}"></span></span></button></sc-for></div></sc-if>
+</div>
+<div style="background: #181715; border-radius: 12px; padding: 4px 12px">
+<button class="ink-row" onClick="{{ togglePlat }}" aria-expanded="{{ platExpanded }}" style="width: 100%; min-height: 44px; padding: 0; background: transparent; border: none; color: #F2EEE6; font-family: inherit; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 8px; cursor: pointer"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#F06A50" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2" width="10" height="20" rx="2"></rect><path d="M11 18h2"></path></svg>Platforms<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#B5AEA0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="{{ platChev }}"><path d="m6 9 6 6 6-6"></path></svg></button>
+<sc-if value="{{ platOpen }}" hint-placeholder-val="{{ true }}"><div style="display: flex; flex-direction: column; padding-bottom: 8px; animation: rise 200ms ease both"><sc-for list="{{ plats }}" as="row" hint-placeholder-count="4"><button role="switch" aria-checked="{{ row.checked }}" onClick="{{ row.toggle }}" style="width: 100%; min-height: 44px; padding: 0; background: transparent; border: none; color: #D9D3C6; font-family: inherit; font-size: 12px; display: flex; align-items: center; gap: 8px; cursor: pointer"><span style="text-align: left">{{ row.name }}</span><span aria-hidden="true" style="{{ row.track }}"><span class="ink-knob" style="{{ row.knob }}"></span></span></button></sc-for></div></sc-if>
+</div>
+<div style="background: #181715; border-radius: 12px; padding: 4px 12px">
+<button class="ink-row" onClick="{{ toggleTitle }}" aria-expanded="{{ titleExpanded }}" style="width: 100%; min-height: 44px; padding: 0; background: transparent; border: none; color: #F2EEE6; font-family: inherit; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 8px; cursor: pointer"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#F06A50" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 6h14M12 6v13M9 19h6"></path></svg>Title<span style="margin-left: auto; color: #B5AEA0; font-weight: 400; font-size: 11px">{{ deckCount }}</span><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#B5AEA0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="{{ titleChev }}"><path d="m6 9 6 6 6-6"></path></svg></button>
+<sc-if value="{{ titleOpen }}" hint-placeholder-val="{{ true }}"><div style="display: flex; flex-direction: column; gap: 8px; padding-bottom: 12px; animation: rise 200ms ease both"><span style="font-size: 12px; font-weight: 600; line-height: 1.45">{{ titleText }}</span><span style="color: #B5AEA0; line-height: 1.4">{{ titleWhy }}</span><div style="display: flex; gap: 6px"><button class="ink-btn" onClick="{{ nextTitle }}" style="flex: 1 1 0; min-height: 44px; background: transparent; border: 1px solid #3A3731; border-radius: 10px; color: #F2EEE6; font-family: inherit; font-size: 12px; display: flex; align-items: center; justify-content: center; gap: 6px"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h11l-3-3M20 17H9l3 3"></path></svg>Next</button><button class="ink-btn" onClick="{{ copy }}" style="{{ copyStyle }}">{{ copyText }}</button></div></div></sc-if>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 6px"><sc-for list="{{ rules }}" as="rule" hint-placeholder-count="4"><span style="{{ rule.style }}">{{ rule.name }}</span></sc-for></div>
+<div style="margin-top: auto; display: flex; flex-direction: column; gap: 10px; padding: 14px; background: #F2EEE6; color: #1A1917; border-radius: 12px">
+<span style="display: flex; align-items: center; gap: 6px; font-family: 'Shippori Mincho', serif; font-weight: 700; font-size: 14px"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#A82C17" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M18 6l-2.5 2.5M8.5 15.5 6 18"></path></svg>Analysis note</span>
+<span style="line-height: 1.5; color: #3A3731">{{ noteText }}</span>
+<button class="ink-btn" onClick="{{ applyNote }}" style="{{ noteBtn }}">{{ noteBtnText }}</button>
+</div>
+</aside>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+constructor(props) {
+super(props);
+this.state = { preset: 'general', clip: 'chain', ranges: { chain: [1, 29], fin: [20, 29], open: [1, 10], mid: [13.5, 25] }, head: 20.5, playing: false, tall: false, search: true, open: { facts: true, plat: true, title: true }, facts: [true, true], plats: [true, true, true, false], title: 0, copied: false, lifted: false, applied: false };
+}
+renderVals() {
+const s = this.state;
+const T = 32;
+const boss = s.preset === 'boss';
+const pct = (t) => ((t / T) * 100).toFixed(2) + '%';
+const fmt = (t) => '0:' + (t < 10 ? '0' : '') + t.toFixed(1);
+const r = s.ranges[s.clip];
+const events = [
+{ t: 1.5, k: 'move', label: 'Boss leap', g: 'Fast movement' },
+{ t: 2, k: 'hit', label: 'Issen 1', g: 'Highlight 1' },
+{ t: 4.5, k: 'hit', label: 'Issen 2', g: 'Highlight 2' },
+{ t: 7, k: 'hit', label: 'Issen 3', g: 'Highlight 3' },
+{ t: 10.5, k: 'move', label: 'Red explosion', g: 'Red effect' },
+{ t: 14, k: 'hit', label: 'Issen 4', g: 'Highlight 4' },
+{ t: 20.5, k: 'hit', label: 'Issen 5', g: 'Highlight 5' },
+{ t: 24, k: 'hit', label: 'Issen 6', g: 'Highlight 6' },
+{ t: 27, k: 'peak', label: 'Finisher', g: 'Peak moment' },
+{ t: 29, k: 'peak', label: 'Victory', g: 'Text: Victory' }
+];
+const name = (e) => (boss ? e.label : e.g);
+const jump = (t) => () => this.setState({ head: t, playing: false });
+const chips = events.filter((e) => e.k !== 'move').map((e, i) => {
+const on = s.head === e.t;
+const gold = e.k === 'peak';
+return {
+label: name(e),
+aria: name(e) + ' at ' + fmt(e.t),
+glyph: gold ? 'flex: 0 0 7px; height: 7px; background: #D9A93F; transform: rotate(45deg); display: block' : 'flex: 0 0 3px; height: 12px; background: #E2452D; transform: rotate(12deg); display: block',
+style: 'position: absolute; top: 0; left: ' + pct(e.t) + '; width: 7.4%; min-width: 44px; height: 30px; padding: 0 8px; box-sizing: border-box; display: flex; align-items: center; gap: 6px; border-radius: 8px; font-family: inherit; font-size: 11px; cursor: pointer; color: #F2EEE6; animation: pop 260ms ease both; animation-delay: ' + (i * 60) + 'ms; background: ' + (on ? '#4A2219' : '#2A1A16') + '; border: 1px solid ' + (on ? '#E2452D' : gold ? '#6B5522' : '#5A2A20'),
+pick: jump(e.t)
+};
+});
+const ticks = [0, 4, 8, 12, 16, 20, 24, 28].map((t) => ({ label: fmt(t).slice(0, 4), style: 'position: absolute; top: 0; left: ' + pct(t) + '; padding-left: 4px; border-left: 1px solid #3A3731; height: 14px; display: block' }));
+const frames = [];
+for (let i = 0; i < 16; i++) {
+const t = (i + 0.5) * (T / 16);
+const inClip = t >= r[0] && t <= r[1];
+frames.push({ style: 'position: relative; flex: 1 1 0; background: ' + (inClip ? '#1F1D1A' : '#141312') + '; display: block; overflow: hidden', slash: 'position: absolute; left: 20%; top: 70%; width: 70%; height: 3px; background: ' + (inClip ? '#E2452D' : '#5A2A20') + '; transform: rotate(-' + (20 + ((i * 23) % 40)) + 'deg); transform-origin: left; display: block' });
+}
+const bars = [];
+for (let i = 0; i < 80; i++) {
+const t = (i / 80) * T;
+const dead = (t > 11.5 && t < 13.5) || (t > 15 && t < 20) || t < 1 || t > 29.5;
+const h = dead ? 3 : 8 + ((i * 37) % 23);
+const inClip = t >= r[0] && t <= r[1];
+bars.push({ style: 'flex: 1 1 0; height: ' + h + 'px; border-radius: 1px; display: block; background: ' + (dead ? '#2B2925' : inClip ? '#D9D3C6' : '#5A554B') });
+}
+const defs = [
+{ id: 'chain', b: 'Full chain', g: 'Best run', a: 34, ring: 18 },
+{ id: 'fin', b: 'Finisher', g: 'Ending', a: 16, ring: 58 },
+{ id: 'open', b: 'Opening chain', g: 'Opening', a: 52, ring: 34 },
+{ id: 'mid', b: 'Dive counter', g: 'Middle run', a: 68, ring: 8 }
+];
+const thumbs = defs.map((d) => {
+const rr = s.ranges[d.id];
+const on = s.clip === d.id;
+const nm = boss ? d.b : d.g;
+return {
+name: nm,
+aria: nm + ', ' + (rr[1] - rr[0]).toFixed(1) + ' seconds',
+dur: (rr[1] - rr[0]).toFixed(1) + 's',
+pressed: on ? 'true' : 'false',
+style: 'position: relative; width: 100%; height: 130px; padding: 0; background: #151412; border: none; border-radius: 10px; overflow: hidden; cursor: pointer; font-family: inherit; outline: 2px solid ' + (on ? '#E2452D' : 'transparent') + '; outline-offset: 2px',
+ring: 'position: absolute; left: ' + d.ring + '%; top: 18px; width: 54px; height: 54px; border: 8px solid rgba(242,238,230,0.16); border-radius: 50%; display: block',
+slash: 'position: absolute; left: 16%; top: 78px; width: 72%; height: 5px; border-radius: 3px; background: #E2452D; transform: rotate(-' + d.a + 'deg); transform-origin: left; display: block',
+bar: 'position: absolute; bottom: 0; height: 3px; background: #E2452D; display: block; left: ' + pct(rr[0]) + '; width: ' + pct(rr[1] - rr[0]),
+pick: () => this.setState({ clip: d.id, head: rr[0], playing: false, lifted: false })
+};
+});
+const sel = defs.find((d) => d.id === s.clip);
+const sw = (on) => ({
+track: 'position: relative; flex: 0 0 34px; height: 20px; margin-left: 8px; border-radius: 10px; display: block; transition: background 200ms ease; background: ' + (on ? '#C8381F' : '#3A3731'),
+knob: 'position: absolute; top: 3px; width: 14px; height: 14px; border-radius: 50%; display: block; background: #F2EEE6; left: ' + (on ? '17px' : '3px')
+});
+const flip = (key, i) => () => { const next = s[key].slice(); next[i] = !next[i]; this.setState({ [key]: next }); };
+const factNames = boss ? ['No damage taken', '6 Issen counters in a row'] : ['6 highlights found', '3 quiet stretches'];
+const facts = factNames.map((n, i) => {
+const on = boss && s.facts[i];
+const k = sw(on);
+return { name: n, checked: on ? 'true' : 'false', tail: boss ? (on ? 'confirmed' : 'unconfirmed') : 'detected', track: boss ? k.track : 'display: none', knob: k.knob, toggle: boss ? flip('facts', i) : () => {} };
+});
+const plats = ['YouTube long-form', 'Shorts', 'Instagram Reels', 'TikTok'].map((n, i) => {
+const k = sw(s.plats[i]);
+return { name: n, checked: s.plats[i] ? 'true' : 'false', track: k.track + '; margin-left: auto', knob: k.knob, toggle: flip('plats', i) };
+});
+const titles = boss ? [
+{ t: 'Onimusha Way of the Sword - Byakue No Damage (Issen Mastery)', why: 'Recommended · game and boss lead, honest hook after' },
+{ t: 'Onimusha Way of the Sword - How to Beat Byakue Made Easy', why: 'Alternate · targets how-to searches' },
+{ t: 'Onimusha Way of the Sword - Byakue Boss Fight (6 Issen Counters in a Row)', why: 'Alternate · mechanic hook with a confirmed count' }
+] : [
+{ t: '[Subject] - [what happens in the video]', why: 'General mode · fill in the subject, or pick a preset for a pattern' },
+{ t: '[Subject] - [best moment] in [length]', why: 'Alternate · leads with the payoff' }
+];
+const ti = s.title % titles.length;
+const ruleDefs = boss ? [['No Damage', 'p'], ['Search-first', 'p'], ['Cannibalization', 'w'], ['Final Boss', 'b']] : [['Search-first', 'p'], ['Chapters', 'p'], ['Cannibalization', 'w'], ['Link back', 'p']];
+const rules = ruleDefs.map((d) => ({ name: d[0], style: 'padding: 5px 10px; border-radius: 12px; border: 1px solid ' + (d[1] === 'p' ? '#3F6B49' : d[1] === 'w' ? '#8A6A2A' : '#E2452D') + '; color: ' + (d[1] === 'p' ? '#A9DDB5' : d[1] === 'w' ? '#F7C97A' : '#F2EEE6') + (d[1] === 'b' ? '; text-decoration: line-through; text-decoration-color: #E2452D; text-decoration-thickness: 2px' : '') }));
+const nudge = (idx, by) => () => {
+const next = r.slice();
+next[idx] = Math.max(0, Math.min(T, next[idx] + by));
+if (next[1] - next[0] < 3) return;
+this.setState({ ranges: Object.assign({}, s.ranges, { [s.clip]: next }), head: next[idx], playing: false, lifted: false });
+};
+const step = (dir) => () => {
+const ts = events.map((e) => e.t);
+const nxt = dir > 0 ? ts.find((t) => t > s.head) : ts.slice().reverse().find((t) => t < s.head);
+if (nxt !== undefined) this.setState({ head: nxt, playing: false });
+};
+const at = events.find((e) => e.t === s.head);
+const headBase = 'position: absolute; top: 18px; bottom: 0; width: 0; border-left: 2px dashed #F2EEE6; pointer-events: none; ';
+const chev = (o) => 'margin-left: ' + '8px; transition: transform 200ms ease; transform: rotate(' + (o ? '180deg' : '0deg') + ')';
+const toggleOpen = (k) => () => this.setState({ open: Object.assign({}, s.open, { [k]: !s.open[k] }) });
+const tallK = sw(s.tall);
+return {
+presetTabs: [{ id: 'general', name: 'General' }, { id: 'boss', name: 'Boss fight' }].map((p) => ({ name: p.name, pressed: s.preset === p.id ? 'true' : 'false', style: 'min-height: 44px; padding: 0 14px; border-radius: 22px; font-family: inherit; font-size: 12px; cursor: pointer; color: #F2EEE6; background: ' + (s.preset === p.id ? '#C8381F' : 'transparent') + '; border: 1px solid ' + (s.preset === p.id ? '#C8381F' : '#3A3731'), pick: () => this.setState({ preset: p.id, title: 0, copied: false }) })),
+searchOpen: s.search,
+searchExpanded: s.search ? 'true' : 'false',
+toggleSearch: () => this.setState({ search: !s.search }),
+promptText: boss ? 'Longest Issen chain for a Reel' : 'Best 30 seconds for a Reel',
+thumbs: thumbs,
+clipName: 'Byakue · ' + (boss ? sel.b : sel.g),
+tallChecked: s.tall ? 'true' : 'false',
+toggleTall: () => this.setState({ tall: !s.tall }),
+tallTrack: tallK.track,
+tallKnob: tallK.knob,
+stageStyle: 'position: relative; height: 100%; background: #070707; overflow: hidden; transition: width 320ms cubic-bezier(.2,.8,.2,1); width: ' + (s.tall ? '169px' : '100%'),
+headLabel: s.playing ? 'Looping clip' : at ? name(at) : 'Clip edge',
+headTime: s.playing ? 'Looping' : fmt(s.head),
+playing: s.playing,
+paused: !s.playing,
+playLabel: s.playing ? 'Pause clip loop' : 'Play clip loop',
+togglePlay: () => this.setState({ playing: !s.playing }),
+prevEvent: step(-1),
+nextEvent: step(1),
+scrubFill: 'position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background: #E2452D; display: block; width: ' + pct(s.head),
+scrubKnob: 'position: absolute; top: -4px; width: 14px; height: 14px; margin-left: -7px; border-radius: 50%; background: #F2EEE6; display: block; left: ' + pct(s.head),
+ticks: ticks,
+chips: chips,
+frames: frames,
+bars: bars,
+rangeStyle: 'position: absolute; top: 0; bottom: 0; left: ' + pct(r[0]) + '; width: ' + pct(r[1] - r[0]) + '; border: 3px solid #E2452D; border-radius: 8px; box-sizing: border-box; display: block; pointer-events: none',
+headStyle: s.playing ? headBase + '--from: ' + pct(r[0]) + '; --to: ' + pct(r[1]) + '; animation: sweep ' + ((r[1] - r[0]) / 4).toFixed(1) + 's linear infinite' : headBase + 'left: ' + pct(s.head) + '; transition: left 240ms cubic-bezier(.2,.8,.2,1)',
+reset: () => this.setState({ ranges: { chain: [1, 29], fin: [20, 29], open: [1, 10], mid: [13.5, 25] }, head: s.ranges[s.clip][0], playing: false, lifted: false, applied: false }),
+startBack: nudge(0, -0.5),
+startFwd: nudge(0, 0.5),
+endBack: nudge(1, -0.5),
+endFwd: nudge(1, 0.5),
+lift: () => this.setState({ lifted: true }),
+liftText: s.lifted ? 'Clip lifted' : 'Lift clip · ' + (r[1] - r[0]).toFixed(1) + 's',
+liftStyle: 'min-height: 44px; padding: 0 16px; border-radius: 22px; font-family: inherit; font-size: 12px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: background 200ms ease; color: ' + (s.lifted ? '#0E1F12' : '#FFF4EC') + '; background: ' + (s.lifted ? '#8FD19E' : '#C8381F') + '; border: 1px solid ' + (s.lifted ? '#8FD19E' : '#C8381F'),
+factsTitle: boss ? 'Facts to confirm' : 'Detected',
+factsOpen: s.open.facts,
+factsExpanded: s.open.facts ? 'true' : 'false',
+factsChev: chev(s.open.facts) + '; margin-left: auto',
+toggleFacts: toggleOpen('facts'),
+facts: facts,
+platOpen: s.open.plat,
+platExpanded: s.open.plat ? 'true' : 'false',
+platChev: chev(s.open.plat) + '; margin-left: auto',
+togglePlat: toggleOpen('plat'),
+plats: plats,
+titleOpen: s.open.title,
+titleExpanded: s.open.title ? 'true' : 'false',
+titleChev: chev(s.open.title),
+toggleTitle: toggleOpen('title'),
+deckCount: (ti + 1) + ' of ' + titles.length,
+titleText: titles[ti].t,
+titleWhy: titles[ti].why,
+nextTitle: () => this.setState({ title: ti + 1, copied: false }),
+copy: () => this.setState({ copied: true }),
+copyText: s.copied ? 'Copied' : 'Copy',
+copyStyle: 'flex: 1 1 0; min-height: 44px; border-radius: 10px; font-family: inherit; font-size: 12px; cursor: pointer; transition: background 200ms ease; color: ' + (s.copied ? '#0E1F12' : '#F2EEE6') + '; background: ' + (s.copied ? '#8FD19E' : 'transparent') + '; border: 1px solid ' + (s.copied ? '#8FD19E' : '#3A3731'),
+rules: rules,
+noteText: s.applied ? 'Applied. The clip now starts half a second later, so the first clash lands in the opening second.' : fmt(s.ranges.chain[0]) + ' · The first clash lands a full second in. Starting half a second later puts it in the opening second.',
+noteBtnText: s.applied ? 'Applied' : 'Apply recommendation',
+noteBtn: 'min-height: 44px; border-radius: 10px; font-family: inherit; font-size: 12px; font-weight: 600; cursor: pointer; color: #FFF4EC; background: ' + (s.applied ? '#5A554B' : '#A82C17') + '; border: 1px solid ' + (s.applied ? '#5A554B' : '#A82C17'),
+applyNote: () => { if (s.applied) return; const next = [s.ranges.chain[0] + 0.5, s.ranges.chain[1]]; this.setState({ ranges: Object.assign({}, s.ranges, { chain: next }), clip: 'chain', head: next[0], applied: true, playing: false }); }
+};
+}
+}
+</script>
+</body>
+</html>

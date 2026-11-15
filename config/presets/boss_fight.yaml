@@ -1,0 +1,99 @@
+id: boss_fight
+name: Boss fight
+description: Skilled boss-fight runs in hard action games.
+
+event_types:
+  - {id: counter,      label: Counter,      glyph: slash,   color: accent, definition: "The player lands a perfect counter or riposte."}
+  - {id: parry,        label: Parry,        glyph: slash,   color: paper,  definition: "The player deflects an attack without a follow-up."}
+  - {id: hit_taken,    label: Hit taken,    glyph: dot,     color: warn,   definition: "The player's health bar drops."}
+  - {id: boss_attack,  label: Boss move,    glyph: dot,     color: paper,  definition: "A named or distinctive boss attack.", show: false}
+  - {id: phase_change, label: Phase change, glyph: ring,    color: paper,  definition: "The boss enters a new phase or transforms."}
+  - {id: finisher,     label: Finisher,     glyph: diamond, color: gold,   definition: "The killing blow or finishing animation."}
+
+facts:
+  - key: hits_taken
+    label: Hits taken
+    type: int                 # int | text | bool | enum (with options)
+    derive_from: hit_taken    # count of visible events of this type
+    required: true
+    instructions: >
+      List each timestamp where the player's health drops, or state clearly
+      that it never drops. If the health bar is not visible, say so.
+  - {key: counter_count, label: Counters landed, type: int, derive_from: counter}
+  - {key: encounter,     label: Encounter,       type: text}
+
+research_fields:
+  - {key: canonical_name}
+  - {key: real_name}
+  - {key: epithet,       needs_credible_source: true}
+  - {key: questline}
+  - {key: phases}
+  - {key: signature_mechanics}
+  - {key: is_final_boss, type: bool, needs_credible_source: true}
+  - {key: is_first_boss, type: bool, needs_credible_source: true}
+  - {key: studio}
+  - {key: platforms}
+  - {key: protagonist}
+credit_fields: [real_name, epithet, questline, platforms, studio]
+
+hooks:
+  - {id: no_hit,   text: "No Hit",                       thumbnail_word: "NO HIT",            thumbnail_text_style: "gold, heavy black outline", when: {fact: hits_taken, op: eq, value: 0}}
+  - {id: one_hit,  text: "Only 1 Hit Taken",             thumbnail_word: "1 HIT TAKEN",       when: {fact: hits_taken, op: eq, value: 1}}
+  - {id: few_hits, text: "Only {hits_taken} Hits Taken", thumbnail_word: "{hits_taken} HITS", when: {fact: hits_taken, op: between, value: [2, 3]}}
+  - {id: counters, text: "{counter_count} Counters",     when: {fact: counter_count, op: gte, value: 3}}
+thumbnail_words: ["2 V 1"]    # extra words with no claim attached
+
+title_patterns:
+  recommended: "{topic} - {subject} Boss Fight ({hook})"
+  alternates:
+    - "{topic} - How to Beat {subject} Made Easy"
+    - "{topic} - {subject} ({hook})"
+
+claim_rules:
+  - id: no_hit_claim
+    phrases: ["No Hit", "No Damage", "Hitless", "Flawless", "Untouched", "Zero Hits", "Without Getting Hit", "Perfect Run"]
+    requires: {fact: hits_taken, op: eq, value: 0}
+    severity: block
+  - {id: final_boss_claim, phrases: ["Final Boss"], requires: {research: is_final_boss, op: eq, value: true}, severity: block, suggest: "Final Fight"}
+  - {id: first_boss_claim, phrases: ["First Boss"], requires: {research: is_first_boss, op: eq, value: true}, severity: block}
+
+clip_rules:
+  lead_in_s: 0.5              # start this long before the first event in range
+  tail_s: 0.5                 # end this long after the closing event
+  end_on: [finisher]          # event types that close a clip; falls back to the last event in range
+  start_cue: "a beat before the first clash"
+  end_cue: "on the result flash, before any dissolve"
+
+saved_prompts: ["Longest counter chain", "Finisher", "Phase change"]
+tag_recipe: [topic_variants, subject_names, difficulty_terms, questline_area, mechanics, protagonist, studio, channel]
+banned_tags: [soulslike]      # removed automatically; delete the entry if the tag is accurate
+
+slots:                        # text the writer model fills
+  hook_line: "1 to 2 sentences that open the description and restate the title's promise in plain words."
+  body_paragraph: "3 to 5 sentences on the tactics that worked, in first person."
+  tip: "One specific tip that pays off during the clip, 2 sentences."
+  plain_hook: "On-screen text in plain language with a number, no niche jargon."
+  what_happens: "One sentence on what happens in the clip."
+  term_explained: "The game's term for the mechanic, explained in one line."
+  question: "A question that invites a reply."
+  emoji: "One fitting emoji."
+
+templates:
+  shorts_description: |
+    {hook}. That's all {subject} got. {emoji}
+
+    {tip}
+
+    Full fight + every boss: {playlist_url}
+
+    {hashtags}
+  reel: |
+    ON-SCREEN: {plain_hook}. No cuts.
+    CAPTION: {what_happens} {term_explained}
+
+    {question}
+
+    Full boss fights on YouTube: {channel_name}
+
+    {hashtags}
+  reel_end_text: "Full fight on YouTube {handle}"

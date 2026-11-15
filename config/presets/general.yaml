@@ -1,0 +1,49 @@
+id: general
+name: General
+description: Works on any video. No niche vocabulary, no claim rules.
+event_types:
+  - {id: highlight,    label: Highlight,      glyph: slash,   color: accent, definition: "A moment a viewer would want to see again."}
+  - {id: scene_change, label: Scene change,   glyph: ring,    color: paper,  definition: "The location, activity or subject changes."}
+  - {id: screen_text,  label: On-screen text, glyph: dot,     color: paper,  definition: "New text appears on screen."}
+  - {id: peak,         label: Peak moment,    glyph: diamond, color: gold,   definition: "The most striking moment of a section."}
+facts: []
+research_fields:
+  - {key: canonical_name}
+  - {key: summary}
+credit_fields: []
+hooks: []
+thumbnail_words: []
+title_patterns:
+  recommended: "{topic} {subject} - {hook}"
+  alternates: ["{subject}: {what_happens}"]
+claim_rules: []
+clip_rules: {lead_in_s: 0.5, tail_s: 0.5}
+saved_prompts: ["Best 30 seconds", "Opening", "Ending"]
+tag_recipe: [subject_names, topic_variants, channel]
+banned_tags: []
+slots:
+  hook_line: "1 to 2 sentences that open the description and say what the video shows."
+  body_paragraph: "3 to 5 sentences on what happens and what is worth noticing."
+  plain_hook: "On-screen text in plain language, one short line."
+  what_happens: "One sentence on what happens in the clip."
+  question: "A question that invites a reply."
+  emoji: "One fitting emoji."
+templates:
+  shorts_description: |
+    {plain_hook} {emoji}
+
+    {what_happens}
+
+    {full_video_ref}
+
+    {hashtags}
+  reel: |
+    ON-SCREEN: {plain_hook}
+    CAPTION: {what_happens}
+
+    {question}
+
+    {full_video_ref}
+
+    {hashtags}
+  reel_end_text: "Full video on YouTube {handle}"

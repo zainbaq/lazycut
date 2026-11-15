@@ -1,0 +1,91 @@
+# Playbook for the Phase 0 test: how the boss_fight event types appear in this game.
+# Version 2 (2026-11-15). Version 1 was written from web research alone and made Gemini
+# report no counters at all: the guides describe the mechanic, not what it looks like.
+# In this version the `counter`, `hit_taken` and `screen_notes` cues were rewritten by
+# Claude after looking at frames of the two test videos. Version 1 is kept in
+# eval/playbooks/phantom-blade-zero.v1-research-only.yaml.txt.
+# The app reads playbooks from config/playbooks/ and matches them to a video's topic.
+
+topic: "Phantom Blade Zero"
+coverage: partial
+summary: >
+  Fast wuxia sword combat. Dangerous enemy attacks are colour-coded by a flash on
+  the enemy just before they land: a blue flash (Brutal Move) can be parried, a
+  red flash (Killer Move) cannot and must be dodged. A perfectly timed parry of a
+  blue attack, or a perfectly timed dodge of a red one, triggers a Ghoststep: the
+  player character abruptly relocates behind the enemy and gets a free attack on
+  its back. Both fighters have a Sha-Chi gauge next to health. Blocking drains the
+  player's Sha-Chi, not health. Emptying the enemy's Sha-Chi breaks its guard and
+  opens it to an Execution.
+
+entries:
+  - event_type: counter
+    known_as: "perfect parry or perfect dodge (guides call the result a Ghoststep)"
+    looks_like: >
+      Seen in two forms. (1) Against a red-flash attack: a thin red glint crosses
+      the enemy, then at impact the screen bursts red with a brief slow-motion
+      zoom and blur while the player strikes the enemy and it is thrown or
+      staggered. (2) Against other attacks: a large white spherical shockwave
+      bursts around the fighters, the boss's health bar at the top flashes red,
+      and the boss is left open while the player hits it. Report the burst.
+    not_to_confuse_with: >
+      An ordinary block: orange sparks where the blades meet, with no burst, no
+      slow motion and the boss not staggered (that is a parry).
+
+  - event_type: parry
+    known_as: "block or parry without a Ghoststep"
+    looks_like: >
+      The player's weapon meets the enemy's attack and the player holds position
+      in front of the enemy. No relocation behind it.
+    not_to_confuse_with: >
+      A hit taken. A blocked attack drains the player's Sha-Chi gauge but leaves
+      the health bar unchanged.
+
+  - event_type: hit_taken
+    known_as: "health loss, or being grabbed"
+    looks_like: >
+      The thin white bar at the bottom left gets shorter, usually flashing red
+      for a moment as it does. Also report a boss grab that pins the player in a
+      short cinematic, even if the bar does not move.
+    not_to_confuse_with: >
+      Blocked attacks, the gold bar under the health bar dropping, the player
+      being pushed back while guarding, or the white bar getting longer (the
+      player healing). None of these are hits.
+
+  - event_type: boss_attack
+    known_as: "Brutal Move (blue flash) or Killer Move (red flash)"
+    looks_like: >
+      A flash of blue or red on the enemy just before a heavy attack. Say which
+      colour in the label.
+
+  - event_type: phase_change
+    looks_like: >
+      Bosses in this game often have two or three phases. Look for a short
+      cinematic, a change in the boss's weapon or stance, or its health bar refilling.
+
+  - event_type: finisher
+    known_as: "Execution"
+    looks_like: >
+      After the boss's guard is broken, a button prompt appears above it, followed
+      by a short cinematic killing animation. Report the first frame of that
+      animation for the kill that ends the fight.
+    not_to_confuse_with: >
+      Executions or guard breaks earlier in the fight that do not end it.
+
+screen_notes: >
+  Player health is the thin white bar at the bottom left. The gold bar directly
+  beneath it is Sha-Chi, not health. The small number to its left is the count
+  of healing items. The boss's name and health bar are at the top centre.
+
+unknowns:
+  - "No source describes the HUD layout or what a counter looks like; those cues come from the test footage."
+  - "No source covers the bosses named The Sword Fanatic or The Gate Keeper."
+  - "Several guides were written from pre-release demos; details may differ in the released game."
+
+sources:
+  - "https://games.gg/phantom-blade-0/guides/combat-sha-chi-parry-ghoststep/"
+  - "https://thegameswiki.com/phantom-blade-zero/wiki/parry-and-deflection"
+  - "https://thegameswiki.com/phantom-blade-zero/wiki/ghost-steps"
+  - "https://www.techbloat.com/phantom-blade-zero-combat-how-to-read-attacks-break-sha-chi-and-use-your-weapons.html"
+  - "https://allthings.how/?p=320466"
+  - "https://www.playnews.gg/en/guides/how-to-beat-bai-chilian-in-phantom-blade-zero-tips-for-both-phases"

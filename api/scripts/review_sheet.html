@@ -1,0 +1,505 @@
+<title>LazyCut Event Review</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500&family=Space+Grotesk:wght@500;600&display=swap">
+<style>
+/* Layout: a logging sheet. One column of moments in video order; each moment is a
+   timecode, a row of frames 0.25 s apart, and a yes/no answer. Dark first, like a viewing room. */
+:root {
+  color-scheme: dark;
+  --bg: #14171c; --panel: #1c2027; --panel-2: #232831; --line: #303743;
+  --fg: #e7e9ed; --muted: #9aa3b0;
+  --accent: #f0b354; --on-accent: #1b1405;
+  --yes: #5bc08c; --yes-bg: #17301f; --no: #e8756c; --no-bg: #3a1c1a;
+  --display: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+  --text: "Inter", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg: #f1f2f4; --panel: #ffffff; --panel-2: #f6f7f9; --line: #d3d8e0;
+    --fg: #191d24; --muted: #596270;
+    --accent: #9a5d06; --on-accent: #ffffff;
+    --yes: #1c7f4f; --yes-bg: #dff3e7; --no: #b93a33; --no-bg: #fbe4e2;
+  }
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f1f2f4; --panel: #ffffff; --panel-2: #f6f7f9; --line: #d3d8e0;
+  --fg: #191d24; --muted: #596270;
+  --accent: #9a5d06; --on-accent: #ffffff;
+  --yes: #1c7f4f; --yes-bg: #dff3e7; --no: #b93a33; --no-bg: #fbe4e2;
+}
+
+body { background: var(--bg); color: var(--fg); font: 15px/1.5 var(--text); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+.wrap {
+  max-width: 980px; margin: 0 auto; padding-block: 28px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; gap: 20px;
+}
+h1 { font: 600 28px/1.15 var(--display); margin: 0; text-wrap: balance; }
+h2 { font: 600 18px/1.2 var(--display); margin: 0; }
+p { margin: 0; }
+.lede { color: var(--muted); max-width: 65ch; }
+.intro { display: flex; flex-direction: column; gap: 8px; }
+
+button, select, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.bar {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
+  background: var(--bg); border-bottom: 1px solid var(--line);
+  padding-block: 10px; display: flex; flex-direction: column; gap: 10px;
+}
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.tab, .chip {
+  border: 1px solid var(--line); background: transparent; border-radius: 6px; padding: 7px 12px;
+  display: inline-flex; gap: 8px; align-items: baseline;
+}
+.tab { font: 500 15px var(--display); }
+.tab small, .chip small { font: 500 12px var(--mono); color: var(--muted); }
+.tab[aria-selected="true"] { background: var(--panel); border-color: var(--accent); }
+.chip { font-size: 13px; padding: 5px 10px; border-radius: 999px; color: var(--muted); }
+.chip[aria-pressed="true"] { color: var(--fg); background: var(--panel-2); border-color: var(--muted); }
+.save { margin-left: auto; font-size: 13px; color: var(--muted); }
+.save[data-state="error"] { color: var(--no); }
+
+.cards { display: flex; flex-direction: column; gap: 14px; }
+.card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px;
+  display: flex; flex-direction: column; gap: 12px; min-width: 0;
+  content-visibility: auto; contain-intrinsic-size: auto 420px;
+}
+.head { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; }
+.time { font: 500 22px/1 var(--mono); color: var(--accent); font-variant-numeric: tabular-nums; }
+.what { font: 600 17px/1.2 var(--display); }
+.pill { margin-left: auto; font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.card[data-verdict="yes"] .pill { color: var(--yes); background: var(--yes-bg); border-color: transparent; }
+.card[data-verdict="no"] .pill { color: var(--no); background: var(--no-bg); border-color: transparent; }
+.card[data-verdict="no"] .frames, .card[data-verdict="no"] .hud { opacity: 0.45; }
+.why { color: var(--muted); font-size: 13px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.why q { color: var(--fg); quotes: "\201C" "\201D"; }
+
+.frames { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+@media (min-width: 720px) { .frames { grid-template-columns: repeat(8, 1fr); } }
+.tile { border: 0; padding: 0; background: none; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tile i {
+  display: block; width: 100%; aspect-ratio: 16 / 9; border-radius: 3px;
+  background-color: var(--panel-2); background-repeat: no-repeat; background-size: 1600% 100%;
+  outline: 1px solid var(--line); outline-offset: -1px;
+}
+.tile span { font: 500 10.5px/1.2 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; text-align: left; }
+.tile[data-proposed] span::after { content: " \25C6"; color: var(--accent); }
+.tile[aria-pressed="true"] i { outline: 3px solid var(--accent); outline-offset: -3px; }
+.tile[aria-pressed="true"] span { color: var(--accent); }
+
+.hud { display: flex; flex-direction: column; gap: 4px; max-width: 420px; }
+.hud img { display: block; width: 100%; border-radius: 4px; border: 1px solid var(--line); }
+.hud span, .hint { font-size: 12px; color: var(--muted); }
+
+.viewer { display: flex; flex-direction: column; gap: 6px; }
+.viewer video { width: 100%; max-width: 640px; aspect-ratio: 16 / 9; background: #000; border-radius: 4px; }
+
+.answer { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.btn { border: 1px solid var(--line); background: var(--panel-2); border-radius: 6px; padding: 8px 14px; font-weight: 500; }
+.btn.yes[aria-pressed="true"] { background: var(--yes); border-color: var(--yes); color: var(--bg); }
+.btn.no[aria-pressed="true"] { background: var(--no); border-color: var(--no); color: var(--bg); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.btn.quiet { background: transparent; color: var(--muted); }
+select, input[type="text"] { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; }
+input[type="text"] { width: 9ch; font-family: var(--mono); }
+
+.block { border-top: 1px solid var(--line); padding-top: 18px; display: flex; flex-direction: column; gap: 10px; }
+.added { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.added li { display: flex; gap: 12px; align-items: center; }
+.added code { font: 500 14px var(--mono); color: var(--accent); }
+.error { color: var(--no); font-size: 13px; }
+textarea { width: 100%; min-height: 140px; background: var(--panel-2); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; font: 12px/1.4 var(--mono); padding: 8px; box-sizing: border-box; }
+.empty { color: var(--muted); padding: 24px 0; }
+</style>
+
+<div class="wrap">
+  <div class="intro">
+    <h1>Event review</h1>
+    <p class="lede">Each card is a moment that Gemini, the health bar or a red flash on screen flagged as an event. Say whether it happened. Tap a frame to see it full size and to set the moment the event starts. Parries and boss attacks are not listed.</p>
+  </div>
+
+  <div class="bar">
+    <div class="row">
+      <div class="row" id="tabs" role="tablist" aria-label="Videos"></div>
+      <span class="save" id="save" data-state="loading" role="status">Loading saved answers…</span>
+    </div>
+    <div class="row" id="filters" aria-label="Show"></div>
+  </div>
+
+  <div class="cards" id="cards"></div>
+
+  <div class="block">
+    <h2>Add an event the list missed</h2>
+    <p class="hint">Give the time it starts, for example 1:23.5.</p>
+    <div class="row">
+      <input type="text" id="add-time" placeholder="1:23.5" inputmode="decimal" aria-label="Time">
+      <select id="add-type" aria-label="Event type"></select>
+      <button class="btn" id="add-btn" type="button">Add event</button>
+      <span class="error" id="add-error" hidden></span>
+    </div>
+    <ul class="added" id="added"></ul>
+  </div>
+
+  <div class="block">
+    <h2>Answers</h2>
+    <p class="hint" id="export-hint">Answers save as you go. You can also copy them as text.</p>
+    <div class="row">
+      <button class="btn" id="copy-btn" type="button">Copy answers</button>
+      <span class="hint" id="copy-note" hidden></span>
+    </div>
+    <textarea id="export-text" readonly hidden aria-label="Answers as text"></textarea>
+  </div>
+</div>
+
+<script>
+const DATA = /*REVIEW_DATA*/null;
+
+const NAMES = { counter: "Counter", parry: "Parry", hit_taken: "Hit taken", boss_attack: "Boss attack", phase_change: "Phase change", finisher: "Finisher" };
+const FILTERS = [
+  ["all", "All", () => true],
+  ["todo", "To do", (c, a) => !a],
+  ["counter", "Counters", c => c.type === "counter"],
+  ["hit_taken", "Hits", c => c.type === "hit_taken"],
+  ["other", "Other", c => c.type !== "counter" && c.type !== "hit_taken"],
+];
+
+const state = {};          // video id -> {candidates: {id: {verdict, type, t}}, added: [{t, type}]}
+const picked = {};         // candidate id -> the frame time chosen on the card, before or after answering
+const dirty = {}, writing = {}, timers = {};
+let db = null;
+let current = null;
+let filter = "all";
+
+function clock(t, decimals) {
+  const d = decimals == null ? 1 : decimals;
+  const total = Math.max(0, Number(t.toFixed(d)));
+  const m = Math.floor(total / 60);
+  const s = (total - m * 60).toFixed(d);
+  return m + ":" + (Number(s) < 10 ? "0" : "") + s;
+}
+
+function parseClock(text) {
+  const parts = String(text).trim().replace(/s$/i, "").split(":");
+  if (!parts[0] || parts.length > 3) return null;
+  let seconds = 0;
+  for (const part of parts) {
+    if (!/^\d+(\.\d+)?$/.test(part.trim())) return null;
+    seconds = seconds * 60 + Number(part);
+  }
+  return seconds;
+}
+
+function h(tag, attrs, ...children) {
+  const el = document.createElement(tag);
+  for (const [key, value] of Object.entries(attrs || {})) {
+    if (key === "text") el.textContent = value;
+    else if (key.startsWith("on")) el.addEventListener(key.slice(2), value);
+    else if (value !== false && value != null) el.setAttribute(key, value === true ? "" : value);
+  }
+  for (const child of children) if (child != null) el.append(child);
+  return el;
+}
+
+function blank() { return { candidates: {}, added: [] }; }
+
+function tidy(raw) {
+  const out = blank();
+  const answers = raw && typeof raw.candidates === "object" && raw.candidates ? raw.candidates : {};
+  for (const [id, a] of Object.entries(answers)) {
+    if (a && (a.verdict === "yes" || a.verdict === "no")) {
+      out.candidates[id] = { verdict: a.verdict, type: String(a.type || ""), t: Number(a.t) || 0 };
+    }
+  }
+  for (const a of Array.isArray(raw && raw.added) ? raw.added : []) {
+    if (a && isFinite(Number(a.t)) && a.type) out.added.push({ t: Number(a.t), type: String(a.type) });
+  }
+  return out;
+}
+
+function loadLocal(id) {
+  try { return tidy(JSON.parse(localStorage.getItem("review:" + id) || "null")); } catch (e) { return blank(); }
+}
+function saveLocal(id) {
+  try { localStorage.setItem("review:" + id, JSON.stringify(state[id])); } catch (e) { /* kept in memory only */ }
+}
+
+function setSave(kind) {
+  const el = document.getElementById("save");
+  const words = {
+    loading: "Loading saved answers…",
+    saved: "Saved",
+    saving: "Saving…",
+    local: "Saved in this browser only",
+    slow: "Saved answers can't be reached yet. New answers stay in this browser.",
+    error: "Could not save. Your answers are kept in this browser.",
+  };
+  el.dataset.state = kind;
+  el.textContent = words[kind];
+}
+
+// ---- saving ----------------------------------------------------------------------
+
+function changed(id) {
+  saveLocal(id);
+  renderTabs();
+  if (!db) return;
+  dirty[id] = true;
+  clearTimeout(timers[id]);
+  timers[id] = setTimeout(() => { timers[id] = null; flush(id, false); }, 500);
+}
+
+// One write at a time per video. A failed write is tried once more; after that the
+// next answer tries again, so a broken connection never turns into a loop.
+async function flush(id, isRetry) {
+  if (!db || writing[id] || !dirty[id]) return;
+  writing[id] = true;
+  dirty[id] = false;
+  setSave("saving");
+  let failed = false;
+  try {
+    await db.doc("answers/" + id).set(JSON.parse(JSON.stringify(state[id])));
+    setSave("saved");
+  } catch (e) {
+    failed = true;
+    dirty[id] = true;
+    setSave("error");
+    if (e && e.code === "unavailable" && !isRetry) {
+      clearTimeout(timers[id]);
+      timers[id] = setTimeout(() => { timers[id] = null; flush(id, true); }, 2500);
+    }
+  }
+  writing[id] = false;
+  if (!failed && dirty[id] && !timers[id]) flush(id, false);
+}
+
+async function connect() {
+  let store = null;
+  try { store = window.claude && window.claude.use ? await window.claude.use("db") : null; } catch (e) { store = null; }
+  if (!store) { setSave("local"); return; }
+  db = store;
+  const slow = setTimeout(() => { if (document.getElementById("save").dataset.state === "loading") setSave("slow"); }, 10000);
+  for (const video of DATA.videos) {
+    db.doc("answers/" + video.id).onSnapshot(snap => {
+      if (!snap.metadata.fromCache) {
+        clearTimeout(slow);
+        const now = document.getElementById("save").dataset.state;
+        if (now === "loading" || now === "slow") setSave("saved");
+      }
+      if (dirty[video.id] || writing[video.id] || snap.metadata.hasPendingWrites || !snap.exists) return;
+      const next = tidy(snap.data());
+      if (JSON.stringify(next) === JSON.stringify(state[video.id])) return;
+      state[video.id] = next;
+      saveLocal(video.id);
+      renderTabs();
+      if (video.id === current) { renderCards(); renderAdded(); }
+    }, () => { clearTimeout(slow); db = null; setSave("error"); });
+  }
+}
+
+// ---- rendering -------------------------------------------------------------------
+
+function videoById(id) { return DATA.videos.find(v => v.id === id); }
+
+function renderTabs() {
+  const tabs = document.getElementById("tabs");
+  tabs.replaceChildren(...DATA.videos.map(v => {
+    const done = v.candidates.filter(c => state[v.id].candidates[c.id]).length;
+    return h("button", {
+      class: "tab", type: "button", role: "tab", "aria-selected": String(v.id === current),
+      onclick: () => { if (location.hash !== "#" + v.id) location.hash = v.id; else show(v.id); },
+    }, v.title, h("small", { text: done + "/" + v.candidates.length }));
+  }));
+}
+
+function renderFilters() {
+  const video = videoById(current);
+  document.getElementById("filters").replaceChildren(...FILTERS.map(([key, label, test]) => {
+    const n = video.candidates.filter(c => test(c, state[current].candidates[c.id])).length;
+    return h("button", {
+      class: "chip", type: "button", "aria-pressed": String(filter === key),
+      onclick: () => { filter = key; renderFilters(); renderCards(); },
+    }, label, h("small", { text: String(n) }));
+  }));
+}
+
+function card(video, c) {
+  const { frames, step } = DATA.strip;
+  const strip = video.media + "/" + c.id + ".jpg";
+  const clipStart = Math.max(0, c.t - DATA.clip_lead);
+  const answer = () => state[video.id].candidates[c.id];
+  if (picked[c.id] == null) picked[c.id] = answer() && answer().verdict === "yes" ? answer().t : c.t;
+
+  const pill = h("span", { class: "pill" });
+  const typeSelect = h("select", { id: "type-" + c.id, "aria-label": "Event type" },
+    ...DATA.types.map(t => h("option", { value: t, text: NAMES[t] || t })));
+  const yes = h("button", { class: "btn yes", type: "button" });
+  const no = h("button", { class: "btn no", type: "button", text: "No, nothing here" });
+  const clear = h("button", { class: "btn quiet", type: "button", text: "Clear" });
+
+  let nearest = 0;
+  for (let i = 0; i < frames; i++) {
+    if (Math.abs(c.strip_start + i * step - c.t) < Math.abs(c.strip_start + nearest * step - c.t)) nearest = i;
+  }
+  const tiles = [];
+  for (let i = 0; i < frames; i++) {
+    const t = Math.round((c.strip_start + i * step) * 100) / 100;
+    const tile = h("button", {
+      class: "tile", type: "button", "data-proposed": i === nearest, "aria-label": "Frame at " + clock(t, 2),
+      onclick: () => { picked[c.id] = t; if (answer() && answer().verdict === "yes") set("yes"); else refresh(); view(t); },
+    }, h("i", { style: "background-image:url('" + strip + "');background-position:" + (i / (frames - 1) * 100) + "% 0" }),
+       h("span", { text: clock(t, 2) }));
+    tile.dataset.t = t;
+    tiles.push(tile);
+  }
+
+  const viewer = h("div", { class: "viewer", hidden: true });
+  let video_el = null;
+  function view(at) {
+    if (!video_el) {
+      video_el = h("video", { controls: true, playsinline: true, loop: true, preload: "auto", src: video.media + "/" + c.id + ".mp4" });
+      const slow = h("button", { class: "btn quiet", type: "button", text: "Half speed", "aria-pressed": "false",
+        onclick: () => {
+          const on = video_el.playbackRate === 1;
+          video_el.playbackRate = on ? 0.5 : 1;
+          slow.setAttribute("aria-pressed", String(on));
+          slow.textContent = on ? "Normal speed" : "Half speed";
+        } });
+      viewer.append(video_el, h("div", { class: "row" }, slow, h("span", { class: "hint", text: "5 seconds around the moment, with sound." })));
+      viewer.hidden = false;
+    }
+    if (at == null) { video_el.play().catch(() => {}); return; }
+    video_el.pause();
+    const seek = () => { video_el.currentTime = Math.max(0, at - clipStart) + 0.02; };
+    if (video_el.readyState >= 1) seek(); else video_el.addEventListener("loadedmetadata", seek, { once: true });
+  }
+  const play = h("button", { class: "btn", type: "button", text: "Play clip", onclick: () => view(null) });
+
+  function set(verdict) {
+    if (verdict) state[video.id].candidates[c.id] = { verdict, type: typeSelect.value, t: verdict === "yes" ? picked[c.id] : c.t };
+    else delete state[video.id].candidates[c.id];
+    refresh();
+    changed(video.id);
+  }
+  yes.addEventListener("click", () => set("yes"));
+  no.addEventListener("click", () => set("no"));
+  clear.addEventListener("click", () => { picked[c.id] = c.t; set(null); });
+  typeSelect.addEventListener("change", () => { if (answer()) set(answer().verdict); else refresh(); });
+
+  const el = h("article", { class: "card" },
+    h("div", { class: "head" },
+      h("span", { class: "time", text: clock(c.t, 1) }),
+      h("span", { class: "what", text: (NAMES[c.type] || c.type) + "?" }),
+      pill),
+    h("div", { class: "why" },
+      c.label ? h("span", {}, "Gemini: ", h("q", { text: c.label })) : null,
+      ...c.sources.map(s => h("span", { text: s }))),
+    c.hud ? h("div", { class: "hud" },
+      h("img", { src: video.media + "/" + c.id + ".hud.jpg", alt: "The health bar before and after this moment", loading: "lazy" }),
+      h("span", { text: "Health bar just before (top) and just after (bottom)." })) : null,
+    h("div", { class: "frames" }, ...tiles),
+    h("span", { class: "hint", text: "Frames are 0.25 s apart. ◆ marks the proposed time." }),
+    viewer,
+    h("div", { class: "answer" }, typeSelect, yes, no, play, clear));
+
+  function refresh() {
+    const a = answer();
+    el.dataset.verdict = a ? a.verdict : "";
+    typeSelect.value = a ? a.type : typeSelect.value || c.type;
+    yes.textContent = "Yes, starts " + clock(picked[c.id], 2);
+    yes.setAttribute("aria-pressed", String(!!a && a.verdict === "yes"));
+    no.setAttribute("aria-pressed", String(!!a && a.verdict === "no"));
+    clear.hidden = !a;
+    pill.textContent = !a ? "Not answered" : a.verdict === "no" ? "Did not happen"
+      : (NAMES[a.type] || a.type) + " at " + clock(a.t, 2);
+    for (const tile of tiles) tile.setAttribute("aria-pressed", String(Number(tile.dataset.t) === picked[c.id]));
+  }
+  typeSelect.value = c.type;
+  refresh();
+  return el;
+}
+
+function renderCards() {
+  const video = videoById(current);
+  const test = FILTERS.find(f => f[0] === filter)[2];
+  const shown = video.candidates.filter(c => test(c, state[current].candidates[c.id]));
+  const cards = document.getElementById("cards");
+  if (!shown.length) {
+    cards.replaceChildren(h("p", { class: "empty", text: filter === "todo" ? "Every moment in this video is answered." : "Nothing in this group." }));
+    return;
+  }
+  cards.replaceChildren(...shown.map(c => card(video, c)));
+}
+
+function renderAdded() {
+  const list = state[current].added;
+  document.getElementById("added").replaceChildren(...list.map((a, i) =>
+    h("li", {}, h("code", { text: clock(a.t, 2) }), h("span", { text: NAMES[a.type] || a.type }),
+      h("button", { class: "btn quiet", type: "button", text: "Remove",
+        onclick: () => { list.splice(i, 1); renderAdded(); changed(current); } }))));
+}
+
+function show(id) {
+  current = videoById(id) ? id : DATA.videos[0].id;
+  renderTabs();
+  renderFilters();
+  renderCards();
+  renderAdded();
+}
+
+function exportText() {
+  return JSON.stringify(Object.fromEntries(DATA.videos.map(v => [v.id, state[v.id]])), null, 1);
+}
+
+function start() {
+  if (!DATA || !DATA.videos || !DATA.videos.length) {
+    document.getElementById("cards").replaceChildren(h("p", { class: "empty", text: "No candidates. Run scripts.review_sheet build first." }));
+    document.getElementById("save").textContent = "";
+    return;
+  }
+  for (const v of DATA.videos) state[v.id] = loadLocal(v.id);
+  document.getElementById("add-type").replaceChildren(...DATA.types.map(t => h("option", { value: t, text: NAMES[t] || t })));
+
+  document.getElementById("add-btn").addEventListener("click", () => {
+    const input = document.getElementById("add-time");
+    const error = document.getElementById("add-error");
+    const t = parseClock(input.value);
+    if (t == null) {
+      error.textContent = "Write the time as minutes:seconds, for example 1:23.5.";
+      error.hidden = false;
+      return;
+    }
+    error.hidden = true;
+    state[current].added.push({ t, type: document.getElementById("add-type").value });
+    state[current].added.sort((a, b) => a.t - b.t);
+    input.value = "";
+    renderAdded();
+    changed(current);
+  });
+
+  document.getElementById("copy-btn").addEventListener("click", () => {
+    const text = exportText();
+    const note = document.getElementById("copy-note");
+    const box = document.getElementById("export-text");
+    const fallback = () => {
+      box.value = text; box.hidden = false; box.select();
+      note.textContent = "Select the text below and copy it."; note.hidden = false;
+    };
+    if (!navigator.clipboard || !navigator.clipboard.writeText) { fallback(); return; }
+    navigator.clipboard.writeText(text).then(() => { note.textContent = "Copied."; note.hidden = false; }, fallback);
+  });
+
+  window.addEventListener("hashchange", () => show(location.hash.slice(1)));
+  show(location.hash.slice(1));
+  connect();
+}
+
+start();
+</script>
