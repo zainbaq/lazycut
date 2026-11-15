@@ -30,6 +30,40 @@ export function shortDate(value: string | number): string {
   return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 }
 
+/** A published date: a bare "YYYY-MM-DD" is a calendar day (no timezone shift); anything else a timestamp. */
+export function dayDate(value: string | null | undefined): string {
+  if (!value) return "–";
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+  const d = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}
+
+/** Today as "YYYY-MM-DD" in local time, for date inputs. */
+export function todayIso(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** "YYYY-MM-DD" for a date input from a stored date or timestamp ("" when unknown). */
+export function toDateInput(value: string | null | undefined): string {
+  if (!value) return "";
+  if (/^\d{4}-\d{2}-\d{2}/.test(value)) return value.slice(0, 10);
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** A full http(s) link, as the API requires. */
+export function isLink(value: string): boolean {
+  try {
+    const u = new URL(value.trim());
+    return (u.protocol === "https:" || u.protocol === "http:") && !!u.host;
+  } catch {
+    return false;
+  }
+}
+
 export function titleFromFile(name: string): string {
   return name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim();
 }

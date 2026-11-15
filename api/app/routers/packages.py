@@ -51,6 +51,10 @@ def list_packages(video_id: str, request: Request) -> dict:
         s.commit()
         current = packaging.inputs_hash(inp)
         rows = s.exec(select(Package).where(Package.video_id == video_id).order_by(col(Package.created_at))).all()
+        changed = [pkg for pkg in rows if packaging.refresh_from_library(inp, pkg)]
+        if changed:
+            s.add_all(changed)
+            s.commit()
         missing = packaging.missing_required(inp.preset, inp.fact_rows)
         return {
             "can_write": runner.deps.can_research(),

@@ -4,8 +4,9 @@ A local, single-user app that turns one video into a complete publishing package
 See [BUILD_SPEC.md](BUILD_SPEC.md) for the full design.
 
 **Status:** Phase 1 in progress. Import, analysis, the workspace timeline, event editing with
-review mode, facts confirmation, subject research and the YouTube long-form package (rule-checked,
-exportable as Markdown) work; past uploads and "Mark as published" come next (BUILD_SPEC section 10).
+review mode, facts confirmation, subject research, the YouTube long-form package (rule-checked,
+exportable as Markdown), past uploads and "Mark as published" work. Phase 2 (clips and short-form
+packages) comes next (BUILD_SPEC section 10).
 
 ## Setup
 

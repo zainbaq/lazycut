@@ -382,3 +382,34 @@ export type PackageEdit =
 
 /** `POST /packages/{id}/regenerate`. */
 export type PackageRegenerate = { field: EditableField } | { all: true; replace_edits: boolean };
+
+/** A past upload (`GET /library`), typed in by hand or created by "Mark as published". */
+export interface LibraryItem {
+  id: string;
+  video_id: string | null;
+  title: string;
+  subject: string;
+  topic: string;
+  angle: string;
+  hook: string;
+  url: string;
+  playlist: string;
+  /** A date "YYYY-MM-DD" or an ISO timestamp. */
+  published_at: string | null;
+  /** Created by "Mark as published" (video_id is set). */
+  from_app: boolean;
+}
+
+/** `POST /library` (title required) and `PATCH /library/{id}` (any field). */
+export type LibraryItemInput = Partial<
+  Pick<LibraryItem, "title" | "subject" | "topic" | "angle" | "hook" | "url" | "playlist" | "published_at">
+>;
+
+/** `POST /videos/{id}/publish`. */
+export interface PublishBody {
+  url: string;
+  published_at?: string | null;
+}
+
+/** `POST /videos/{id}/publish` returns the video plus the past-upload entry it wrote. */
+export type PublishedVideo = Video & { library_item: LibraryItem };

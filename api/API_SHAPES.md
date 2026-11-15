@@ -1,4 +1,4 @@
-# API shapes (Phase 1, steps 1 to 6)
+# API shapes (Phase 1)
 
 The JSON the web app relies on. `BUILD_SPEC.md` section 8 lists the endpoints; this file fixes
 their payloads. All times are float seconds. Errors are `{"detail": "message"}` with a 4xx/5xx code.
@@ -209,6 +209,29 @@ Rule ids: `canonical_spelling`, `hashtag_count`, `banned_tags` (these auto-fix; 
   `{all: true, replace_edits: false}` (edited fields kept unless `replace_edits`) → 202 `Job`.
 - `GET /videos/{id}/export.md` → the package as Markdown, as a download named
   `{Channel}_{Topic}_{Subject}_YouTube_SEO.md` (spaces and `< > : " / \ | ? *` removed). 404 before generation.
+
+## Past uploads and publishing (Phase 1 step 7)
+
+```
+LibraryItem = {id, video_id: str|null, title, subject, topic, angle, hook, url, playlist,
+               published_at: str|null,            // a date "YYYY-MM-DD" or an ISO timestamp
+               from_app: bool}                    // created by "Mark as published" (video_id set)
+```
+
+- `GET /library` → `[LibraryItem]`, newest `published_at` first.
+- `POST /library` body `{title, subject?, topic?, angle?, hook?, url?, playlist?, published_at?}` → 201
+  `LibraryItem`. `title` is required; `url`, when given, must be a full `http(s)://` link (422 otherwise).
+- `PATCH /library/{id}` body any of those fields → `LibraryItem`. `DELETE /library/{id}` → 204.
+- `POST /videos/{id}/publish` body `{url, published_at?}` → `Video` plus `library_item: LibraryItem`. Sets
+  `published_url` and `published_at` (now when not given) and creates or updates this video's past-upload
+  entry from its package (title, subject, topic, the title's hook as `hook` and, if empty, `angle`, the
+  topic's playlist). The video's `display_status` becomes `published`. 422 for a missing or bad link.
+- `DELETE /videos/{id}/publish` → `Video`: clears the link and date and removes the entry publishing created.
+
+Past uploads feed the package's end-screen target and the `cannibalization` check (a video's own entry is
+never counted against it). They only change code-built parts, so `GET /videos/{id}/packages` refreshes
+`end_screen_target`, the checklist's end-screen line and the rules for free when past uploads change; the
+package is not marked stale. Publishing does not make a package stale either.
 
 ## Analysis and jobs
 

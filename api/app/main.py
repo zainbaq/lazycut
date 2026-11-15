@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.db import init_db, make_engine
-from app.routers import config, events, jobs, packages, research, videos
+from app.routers import config, events, jobs, library, packages, research, videos
 from app.services.jobs import Bus, JobRunner
 from app.services.llm.anthropic import ClaudeProvider
 from app.services.llm.base import VideoProvider
@@ -75,3 +75,4 @@ app.include_router(jobs.router)
 app.include_router(events.router)
 app.include_router(research.router)
 app.include_router(packages.router)
+app.include_router(library.router)

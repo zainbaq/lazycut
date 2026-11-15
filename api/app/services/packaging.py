@@ -94,7 +94,8 @@ def inputs_hash(inp: Inputs) -> str:
         "facts": inp.facts, "research": inp.research,
         "events": [(e.type, round(e.t_start, 1), e.label) for e in inp.events],
         "sections": [(round(g.t_start, 1), g.label) for g in inp.sections],
-        "video": [inp.video.title, inp.video.subject, inp.video.topic, inp.video.published_url],
+        # Not published_url: marking a video as published must not make its own package stale.
+        "video": [inp.video.title, inp.video.subject, inp.video.topic],
         "preset": inp.preset.model_dump(mode="json"),
         "channel": inp.channel.model_dump(mode="json") if inp.channel else None,
     }
@@ -457,7 +458,27 @@ def rule_context(inp: Inputs, dismissed: set[str]) -> RuleContext:
 
 def run_rules(inp: Inputs, fields: dict, previous: list[dict] | None = None) -> tuple[dict, list[dict]]:
     dismissed = {r["key"] for r in previous or [] if r.get("dismissed")}
+    fields = dict(fields) | {"library_sig": library_signature(inp)}
     return check(fields, rule_context(inp, dismissed))
+
+
+def library_signature(inp: Inputs) -> str:
+    data = sorted((p["title"], p["subject"], p["topic"], p["angle"], p["url"]) for p in inp.past)
+    return hashlib.sha256(json.dumps(data).encode()).hexdigest()[:12]
+
+
+def refresh_from_library(inp: Inputs, pkg: Package) -> bool:
+    """Past uploads only change code-built parts (end screen, checklist, the cannibalization check),
+    so they are refreshed for free instead of marking the package stale. True if anything changed."""
+    fields = dict(pkg.fields or {})
+    if not fields or fields.get("library_sig") == library_signature(inp):
+        return False
+    target = end_screen_target(inp)
+    fields["end_screen_target"] = target
+    fields["checklist"] = [c | {"detail": target["label"]} if c.get("item") == "End screen" else c
+                           for c in fields.get("checklist") or []]
+    pkg.fields, pkg.rule_results = run_rules(inp, fields, pkg.rule_results)
+    return True
 
 
 # ---- payloads and export ----------------------------------------------------------

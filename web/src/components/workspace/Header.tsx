@@ -3,17 +3,19 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import * as Dropdown from "@radix-ui/react-dropdown-menu";
 import * as Popover from "@radix-ui/react-popover";
-import { FileDown, Loader2, MoreVertical, RotateCcw, Send, SlidersHorizontal, Trash2, X } from "lucide-react";
+import { ExternalLink, FileDown, Loader2, MoreVertical, RotateCcw, Send, SlidersHorizontal, Trash2, Undo2, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { StatusPill } from "@/components/ui/StatusPill";
 import { ApiError, exportUrl } from "@/lib/api";
+import { dayDate } from "@/lib/format";
 import { useAnalyze, useDeleteVideo, usePackages, useUpdateVideo } from "@/lib/queries";
 import type { Fact, Preset, Timeline, Video } from "@/lib/types";
 
 import { EventGlyph } from "./glyphs";
+import { PublishDialog, UnpublishDialog } from "./PublishDialog";
 import { ReanalyzeDialog } from "./ReanalyzeDialog";
 
 function PresetDetails({ preset }: { preset: Preset }) {
@@ -84,6 +86,8 @@ export function Header({
   const [dialog, setDialog] = useState<null | { presetId?: string }>(null);
   const [dialogError, setDialogError] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [publishOpen, setPublishOpen] = useState(false);
+  const [unpublishOpen, setUnpublishOpen] = useState(false);
 
   const activePreset = presets.find((p) => p.id === video.preset_id);
   const targetPreset = dialog?.presetId ? presets.find((p) => p.id === dialog.presetId) : undefined;
@@ -202,10 +206,28 @@ export function Header({
               <RotateCcw aria-hidden="true" size={14} />
               Re-analyze
             </Dropdown.Item>
-            <Dropdown.Item className={menuItem} disabled>
-              <Send aria-hidden="true" size={14} />
-              Mark as published
-            </Dropdown.Item>
+            {video.published_url ? (
+              <>
+                <Dropdown.Item className={menuItem} asChild>
+                  <a href={video.published_url} target="_blank" rel="noopener noreferrer">
+                    <ExternalLink aria-hidden="true" size={14} />
+                    <span>
+                      Published · open link
+                      {video.published_at ? <span className="block text-[11px] text-fg3">{dayDate(video.published_at)}</span> : null}
+                    </span>
+                  </a>
+                </Dropdown.Item>
+                <Dropdown.Item className={menuItem} onSelect={() => setUnpublishOpen(true)}>
+                  <Undo2 aria-hidden="true" size={14} />
+                  Unpublish
+                </Dropdown.Item>
+              </>
+            ) : (
+              <Dropdown.Item className={menuItem} disabled={importing} onSelect={() => setPublishOpen(true)}>
+                <Send aria-hidden="true" size={14} />
+                Mark as published
+              </Dropdown.Item>
+            )}
             {hasPackage ? (
               <Dropdown.Item className={menuItem} asChild>
                 <a href={exportUrl(video.id)} download>
@@ -247,6 +269,9 @@ export function Header({
         pending={analyze.isPending || update.isPending}
         error={dialogError}
       />
+
+      <PublishDialog video={video} open={publishOpen} onOpenChange={setPublishOpen} />
+      <UnpublishDialog video={video} open={unpublishOpen} onOpenChange={setUnpublishOpen} />
 
       <Dialog.Root open={deleteOpen} onOpenChange={setDeleteOpen}>
         <Dialog.Portal>

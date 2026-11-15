@@ -4,7 +4,7 @@ import * as Tooltip from "@radix-ui/react-tooltip";
 import { ChartLine, Clapperboard, Image as ImageIcon, LayoutGrid, Scissors, Search, Settings, Upload } from "lucide-react";
 import Link from "next/link";
 
-type Section = "library" | "new" | "workspace" | "research";
+type Section = "library" | "new" | "workspace" | "research" | "past";
 
 interface Item {
   id: string;
@@ -63,7 +63,7 @@ export function Rail({ section, videoId }: { section: Section; videoId?: string 
     { id: "workspace", label: "Workspace", icon: Scissors, href: videoId ? `/v/${videoId}` : undefined, disabled: videoId ? undefined : "open a video" },
     { id: "research", label: "Research", icon: Search, href: videoId ? `/v/${videoId}/research` : undefined, disabled: videoId ? undefined : "open a video" },
     { id: "thumbnail", label: "Thumbnail", icon: ImageIcon, disabled: "arrives later" },
-    { id: "past", label: "Past uploads", icon: Clapperboard, disabled: "arrives later" },
+    { id: "past", label: "Past uploads", icon: Clapperboard, href: "/past-uploads" },
   ];
   return (
     <nav aria-label="Sections" className="sticky top-0 flex h-screen w-[60px] shrink-0 flex-col items-center gap-2 border-r border-line bg-raised py-3.5">

@@ -8,6 +8,8 @@ import type {
   Frames,
   ImportList,
   Job,
+  LibraryItem,
+  LibraryItemInput,
   NewEvent,
   NewVideo,
   Package,
@@ -15,6 +17,8 @@ import type {
   PackageList,
   PackageRegenerate,
   Preset,
+  PublishBody,
+  PublishedVideo,
   Research,
   ResearchEdit,
   ResearchRun,
@@ -57,7 +61,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       const body = await res.json();
       if (typeof body?.detail === "string") detail = body.detail;
       else if (Array.isArray(body?.detail)) {
-        detail = body.detail.map((d: { msg?: string }) => d.msg ?? JSON.stringify(d)).join("; ");
+        // Pydantic prefixes validator messages with "Value error, "; the rest is written for the user.
+        detail = body.detail
+          .map((d: { msg?: string }) => (d.msg ? d.msg.replace(/^Value error, /, "") : JSON.stringify(d)))
+          .join("; ");
       }
     } catch {
       // keep the status text
@@ -106,6 +113,14 @@ export const api = {
   /** A paid Claude call. */
   regeneratePackage: (id: string, body: PackageRegenerate) =>
     request<Job>(`/packages/${id}/regenerate`, { method: "POST", ...json(body) }),
+  library: () => request<LibraryItem[]>("/library"),
+  addLibraryItem: (body: LibraryItemInput) => request<LibraryItem>("/library", { method: "POST", ...json(body) }),
+  editLibraryItem: (id: string, body: LibraryItemInput) =>
+    request<LibraryItem>(`/library/${id}`, { method: "PATCH", ...json(body) }),
+  deleteLibraryItem: (id: string) => request<void>(`/library/${id}`, { method: "DELETE" }),
+  publish: (id: string, body: PublishBody) =>
+    request<PublishedVideo>(`/videos/${id}/publish`, { method: "POST", ...json(body) }),
+  unpublish: (id: string) => request<Video>(`/videos/${id}/publish`, { method: "DELETE" }),
 };
 
 /** The package as Markdown, served as a download. */

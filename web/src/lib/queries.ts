@@ -7,10 +7,13 @@ import type {
   Fact,
   FactUpdate,
   Job,
+  LibraryItem,
+  LibraryItemInput,
   NewVideo,
   PackageEdit,
   PackageList,
   PackageRegenerate,
+  PublishBody,
   Research,
   ResearchEdit,
   ResearchRun,
@@ -28,6 +31,8 @@ export const keys = {
   frames: (id: string) => ["frames", id] as const,
   research: (id: string) => ["research", id] as const,
   packages: (id: string) => ["packages", id] as const,
+  allPackages: ["packages"] as const,
+  library: ["library"] as const,
 };
 
 export const useConfigStatus = () =>
@@ -259,6 +264,78 @@ export function useUpdateFact(videoId: string) {
       void qc.invalidateQueries({ queryKey: keys.videos });
       invalidatePackages(qc, videoId); // missing facts and the stale check
     },
+  });
+}
+
+// ---- past uploads and publishing ----------------------------------------------------
+
+export const useLibrary = () => useQuery({ queryKey: keys.library, queryFn: api.library });
+
+/** Past uploads feed every package's end-screen target and repeat check, which the server
+ * refreshes on the next package GET, so all package lists are refetched. */
+function afterLibraryChange(qc: ReturnType<typeof useQueryClient>) {
+  void qc.invalidateQueries({ queryKey: keys.library });
+  void qc.invalidateQueries({ queryKey: keys.allPackages });
+}
+
+export function useAddLibraryItem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: LibraryItemInput) => api.addLibraryItem(body),
+    onSuccess: (item) => {
+      qc.setQueryData<LibraryItem[]>(keys.library, (list) => (list ? [item, ...list] : list));
+      afterLibraryChange(qc);
+    },
+  });
+}
+
+export function useEditLibraryItem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: LibraryItemInput }) => api.editLibraryItem(id, body),
+    onSuccess: (item) => {
+      qc.setQueryData<LibraryItem[]>(keys.library, (list) => list?.map((x) => (x.id === item.id ? item : x)));
+      afterLibraryChange(qc);
+    },
+  });
+}
+
+export function useDeleteLibraryItem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteLibraryItem(id),
+    onSuccess: (_, id) => {
+      qc.setQueryData<LibraryItem[]>(keys.library, (list) => list?.filter((x) => x.id !== id));
+      afterLibraryChange(qc);
+    },
+  });
+}
+
+function afterPublishChange(qc: ReturnType<typeof useQueryClient>, video: Video) {
+  qc.setQueryData<Video>(keys.video(video.id), (v) => (v ? { ...v, ...video } : video));
+  void qc.invalidateQueries({ queryKey: keys.videos });
+  afterLibraryChange(qc);
+}
+
+/** Mark as published: sets the link and date and writes the past-upload entry (free, no model call). */
+export function usePublish(videoId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: PublishBody) => api.publish(videoId, body),
+    onSuccess: (res) => {
+      const video: Video & { library_item?: unknown } = { ...res };
+      delete video.library_item;
+      afterPublishChange(qc, video);
+    },
+  });
+}
+
+/** Undo "Mark as published": clears the link and removes the past-upload entry it created. */
+export function useUnpublish(videoId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.unpublish(videoId),
+    onSuccess: (video) => afterPublishChange(qc, video),
   });
 }
 

@@ -774,7 +774,9 @@ Regeneration and edits:
 - Regenerating a single field must be possible (`POST /packages/{id}/regenerate` with `field`).
 - A manual edit adds the field to `edited_fields`. "Regenerate all" keeps edited fields unless the user ticks "Replace my edits".
 
-**Mark as published.** The overflow menu has "Mark as published": paste the URL, which sets `published_url` and `published_at` and creates a `library_item` from the package (title, subject, topic, hook, playlist). This is how the app's own videos reach the past-uploads list.
+**Mark as published.** The overflow menu has "Mark as published": paste the URL, which sets `published_url` and `published_at` and creates a `library_item` from the package (title, subject, topic, hook, playlist). This is how the app's own videos reach the past-uploads list. As built: publishing again updates the same entry; "Unpublish" (`DELETE /videos/{id}/publish`) clears the link and removes that entry. A video's own entry never counts against it in the cannibalization check, and publishing does not make its package stale (`published_url` is not part of the inputs hash).
+
+**Past uploads and the package.** Past uploads change only code-built parts of a package (the end-screen target, the checklist's end-screen line and the cannibalization check). Reading a package refreshes those parts for free when the past-uploads list has changed, instead of marking the package stale and asking for a paid regeneration.
 
 ### 7.9 Rules engine (`services/rules.py`)
 
@@ -865,7 +867,7 @@ Served at the root of `http://localhost:8000`. JSON unless noted. All list endpo
 | GET | `/videos/{id}` | Video + latest analysis summary + job states |
 | PATCH | `/videos/{id}` | Edit title, subject, topic, topic_terms, preset |
 | DELETE | `/videos/{id}` | Remove rows and media folder. Never touches the import folder |
-| POST | `/videos/{id}/publish` | `{url}` → mark as published and create the past-upload entry |
+| POST | `/videos/{id}/publish` · DELETE | `{url, published_at?}` → mark as published and create the past-upload entry; DELETE undoes it |
 | GET | `/videos/{id}/media` | Video bytes with HTTP Range support. `?quality=proxy` (default) or `source` |
 | GET | `/videos/{id}/frames` | Filmstrip frame URLs + timestamps |
 | GET | `/videos/{id}/frame` | `?t=&w=` → one JPEG cut from the source on demand, cached. For clip thumbnails and the frame picker |
@@ -1110,7 +1112,7 @@ The original plan for this phase, kept for reference:
 
 **Phase 1 — Understand and package**
 
-Status on 2026-11-15: steps 1 to 6 are built (step 4: event editing with undo, review mode, facts confirmation; schema version 3 adds `event.edited`. Step 5: subject research with sources, overrides, spelling correction and the paste fallback. Step 6: the YouTube long-form package, template variables, the rules engine, the package panel and drawer, Markdown export). Not yet built from those steps: `PUT /config/channel` and the preset write endpoints (the preset editor is Phase 3). The API payloads are in `api/API_SHAPES.md`.
+Status on 2026-11-15: steps 1 to 7 are built (step 7: past uploads typed in by hand, "Mark as published" and "Unpublish"; step 4: event editing with undo, review mode, facts confirmation; schema version 3 adds `event.edited`. Step 5: subject research with sources, overrides, spelling correction and the paste fallback. Step 6: the YouTube long-form package, template variables, the rules engine, the package panel and drawer, Markdown export). Not yet built from those steps: `PUT /config/channel` and the preset write endpoints (the preset editor is Phase 3). The API payloads are in `api/API_SHAPES.md`.
 
 Build in this order; each step is usable on its own.
 
