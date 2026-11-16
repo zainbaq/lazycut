@@ -6,12 +6,15 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.db import init_db, make_engine
-from app.routers import config, events, jobs, library, packages, research, videos
+from app.routers import config, events, jobs, library, packages, research, thumbnails, videos
+from app.services.higgsfield import Higgsfield
 from app.services.jobs import Bus, JobRunner
 from app.services.llm.anthropic import ClaudeProvider
 from app.services.llm.base import VideoProvider
 from app.services.llm.gemini import GeminiProvider
 from app.services.pipeline import Deps, analysis_job, import_job, package_job, research_job
+from app.services.search_demand import YouTubeSuggest
+from app.services.thumbnail_jobs import thumb_frames_job, thumbnail_job
 from app.settings import Settings, get_settings
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -49,11 +52,17 @@ async def lifespan(app: FastAPI):
     engine = make_engine(settings.db_path)
     init_db(engine)
     bus = Bus()
-    runner = JobRunner(engine, bus, Deps(settings, gemini_factory(settings), claude_factory(settings)))
+    suggest = YouTubeSuggest() if settings.search_demand == "youtube_suggest" else None
+    images = (Higgsfield(settings.higgsfield_credential, settings.higgsfield_base_url)
+              if settings.higgsfield_credential else None)
+    runner = JobRunner(engine, bus, Deps(settings, gemini_factory(settings), claude_factory(settings),
+                                         suggest_client=lambda: suggest, image_client=lambda: images))
     runner.register("import", import_job)
     runner.register("analysis", analysis_job)
     runner.register("research", research_job)
     runner.register("package", package_job)
+    runner.register("thumbnail_frames", thumb_frames_job)
+    runner.register("thumbnail", thumbnail_job)
     runner.recover()
     app.state.engine, app.state.bus, app.state.runner = engine, bus, runner
     yield
@@ -76,3 +85,4 @@ app.include_router(events.router)
 app.include_router(research.router)
 app.include_router(packages.router)
 app.include_router(library.router)
+app.include_router(thumbnails.router)

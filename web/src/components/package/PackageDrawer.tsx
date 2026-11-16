@@ -14,6 +14,7 @@ import type { EditableField, Goal, Package, Video } from "@/lib/types";
 
 import { ClaimText, GoalChip, SweepCopy } from "./bits";
 import { RuleBadge } from "./RuleBadges";
+import { SearchDemand, TitleIssues, TitleScore } from "./SearchDemand";
 import { LIMITS, claimMarks, isBlocked, resultsFor, tagsLength } from "./rules";
 
 const btn = "ink-btn flex min-h-11 items-center justify-center gap-1.5 rounded-[10px] border border-line3 px-3 text-[12px] disabled:opacity-40";
@@ -355,8 +356,10 @@ export function PackageDrawer({
                                 <span className="flex flex-wrap items-center gap-1.5 text-[11px] text-fg3">
                                   <GoalChip goal={a.goal} />
                                   <span className="tnum">{a.text.length} / 100</span>
+                                  <TitleScore pkg={pkg} text={a.text} />
                                   {a.why ? <span>· {a.why}</span> : null}
                                 </span>
+                                <TitleIssues pkg={pkg} text={a.text} />
                                 {alts.length ? (
                                   <ul className="flex flex-wrap gap-1.5">
                                     {alts.map((r) => (
@@ -435,6 +438,8 @@ export function PackageDrawer({
 
                   <aside className="flex min-w-0 flex-col gap-4 border-line px-4 py-3 min-[900px]:border-l">
                     <SearchPreview pkg={pkg} video={video} channel={status.data?.channel ?? null} />
+
+                    <SearchDemand pkg={pkg} />
 
                     <section aria-labelledby="pd-thumb" className="flex flex-col gap-2">
                       <h3 id="pd-thumb" className="text-[12.5px] font-semibold">

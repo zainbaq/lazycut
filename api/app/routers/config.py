@@ -34,6 +34,7 @@ def config_status(request: Request) -> dict:
             "gemini": bool(settings.gemini_api_key),
             "anthropic": bool(settings.anthropic_api_key),
             "youtube": bool(settings.youtube_api_key),
+            "higgsfield": bool(settings.higgsfield_credential),
         },
         "event_detectors": settings.detector_ids,
         "storage": {

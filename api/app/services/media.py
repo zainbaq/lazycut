@@ -7,6 +7,7 @@ and no video is ever read into memory.
 import asyncio
 import json
 import re
+import uuid
 from array import array
 from bisect import bisect_left, bisect_right
 from collections.abc import Callable
@@ -221,7 +222,8 @@ async def frame_at(src: Path, t: float, width: int, dest: Path) -> Path:
     if dest.is_file() and dest.stat().st_size > 0:
         return dest
     dest.parent.mkdir(parents=True, exist_ok=True)
-    partial = dest.with_name(dest.stem + ".part.jpg")
+    # A name per call: two requests for the same frame must not share (and steal) one partial file.
+    partial = dest.with_name(f"{dest.stem}.{uuid.uuid4().hex[:8]}.part.jpg")
     await _run(
         "ffmpeg", "-hide_banner", "-nostdin", "-y", "-ss", f"{max(0.0, t):.3f}", "-i", str(src),
         "-frames:v", "1", "-vf", f"scale={width}:-2", "-q:v", "3", str(partial),

@@ -56,7 +56,7 @@ A faceless YouTube gaming channel (TheLazyRonin) posting skilled boss-fight runs
 | D8 | The creator is the source of truth about the video. Model output about claimable facts (counts, hits) is a draft until confirmed. Research facts about the world (names, spelling, whether a boss is the final one) are accepted by default with their sources, and the user can override any of them | Gemini has miscounted before; online research is often better than memory for names |
 | D9 | Clips are always one continuous range ("uncut"): trim start and end only, never remove a piece from the middle. This is built into the data model, not a rule or a preset option | Uncut footage is the proof of skill |
 | D10 | Claims in titles are blocked (not warned) when no confirmed fact supports them. Claim wording enters titles through preset hook templates filled from confirmed facts; phrase rules are a backstop for free text and manual edits | Channel credibility |
-| D11 | Thumbnails: v1 suggests frames, a result word and a ready-to-paste image prompt. No image generation API in v1 | Existing tool has no confirmed API route |
+| D11 | Thumbnails: v1 suggests frames, a result word and a ready-to-paste image prompt. No image generation API in v1. **Superseded by D26** | Existing tool had no confirmed API route |
 | D12 | Visual direction: dark "ink" style in an editor-like workspace layout (mockup artboard 5). No Japanese characters or glyphs anywhere | User feedback through five mockup rounds |
 | D13 | UI must feel alive: motion, interactivity and icons throughout; small text | User feedback |
 | D14 | Rules, templates and vocabulary are data (YAML), not hard-coded prompts | So conventions can change without code |
@@ -70,6 +70,7 @@ A faceless YouTube gaming channel (TheLazyRonin) posting skilled boss-fight runs
 | D22 | Past uploads are typed in by hand in v1. Import from the YouTube channel comes in Phase 3 | Simplest start |
 | D23 | No per-game record in v1. A video carries its topic name and optional extra terms; research is shared between videos by matching names | Not needed yet |
 | D24 | Gemini is used only to watch video. All other reasoning (research, clip finding, writing) runs on Claude through the Anthropic API | Owner's decision, 2026-11-14: Gemini is the only API that reads video; Claude does everything else |
+| D26 | Thumbnails are generated in the app through Higgsfield's API (7.13). The image model only paints: LazyCut picks the source, writes the prompt, draws the result word itself by default, sizes the file and has Claude review the result. The model and its options are a setting | Owner's decision, 2026-11-15: keep the usual Higgsfield flow (frame in, 16:9 out, check faces, hands and HUD) but inside the app; Higgsfield's public API (key pair) makes it possible |
 | D25 | Event understanding is a modular engine: separate detectors feed one merge step, and the eye test has the last word (7.3.1). Each part can be replaced or added without touching the others, and a change becomes the default only after it is scored on the reviewed labels | Owner's decision, 2026-11-15: Phase 0 accuracy is good enough to build on, and the engine must stay easy to improve later |
 
 ---
@@ -219,6 +220,7 @@ GEMINI_VIDEO_MODEL=gemini-3.8-flash     # verify current free-tier Flash model i
 ANTHROPIC_API_KEY=                      # research, clip finding and writing (D24)
 ANTHROPIC_MODEL=                        # Claude model id for those calls
 YOUTUBE_API_KEY=                        # optional; research degrades gracefully without it
+HIGGSFIELD_API_KEY=                     # thumbnails (7.13): the console's API key ("id:secret" in one value); each image is a paid call
 IMPORT_DIR=./inbox                      # host folder to import videos from (read-only)
 DATA_DIR=/data
 DB_PATH=/db/app.db
@@ -228,6 +230,7 @@ ANALYSIS_FPS=1                          # full-pass sampling rate; the only rate
 ANALYSIS_MEDIA_RESOLUTION=              # empty = the model's default, the only setting measured in Phase 0
 EVENT_DETECTORS=gemini                  # comma-separated detector ids, in merge priority order (7.3.1)
 EVENT_SNAP=off                          # off | visual (7.3)
+SEARCH_DEMAND=youtube_suggest           # youtube_suggest | off (7.7.1; free, unofficial)
 EXPORT_VERTICAL_SIZE=1080x1920
 WATCH_POLLING=false
 ```
@@ -319,19 +322,26 @@ research_fields:
   - {key: studio}
   - {key: platforms}
   - {key: protagonist}
+  - {key: nicknames,     label: Nicknames,      hint: "names players and guides use for the boss besides the official one"}
+  - {key: genre,                                hint: "the game's genre as its makers and major reviewers describe it"}
+  - {key: is_soulslike,  label: Is a soulslike, type: bool, needs_credible_source: true}
+  - {key: related_games, label: Related games}
 credit_fields: [real_name, epithet, questline, platforms, studio]
+credit_lines: ["Boss: {real_name} ({epithet})", "Game: {topic} ({platforms}, {studio})"]
 
 hooks:
   - {id: no_hit,   text: "No Hit",                       thumbnail_word: "NO HIT",             thumbnail_text_style: "gold, heavy black outline", when: {fact: hits_taken, op: eq, value: 0}}
   - {id: one_hit,  text: "Only 1 Hit Taken",             thumbnail_word: "1 HIT TAKEN",        when: {fact: hits_taken, op: eq, value: 1}}
   - {id: few_hits, text: "Only {hits_taken} Hits Taken", thumbnail_word: "{hits_taken} HITS",  when: {fact: hits_taken, op: between, value: [2, 3]}}
   - {id: counters, text: "{counter_count} Counters",     when: {fact: counter_count, op: gte, value: 3}}
+  - {id: final_boss, text: "Final Boss", thumbnail_word: "FINAL BOSS", when: {research: is_final_boss, op: eq, value: true}}
 thumbnail_words: ["2 V 1"]    # extra words with no claim attached
 
-title_patterns:
+title_patterns:               # the owner's playbook: recommended, search-max, on-brand, short
   recommended: "{topic} - {subject} Boss Fight ({hook})"
   alternates:
-    - "{topic} - How to Beat {subject} Made Easy"
+    - "{topic} {subject} Boss Fight | {search_tail}"
+    - "{topic} - How to Beat {subject} | Boss Made Easy"
     - "{topic} - {subject} ({hook})"
 
 claim_rules:
@@ -350,11 +360,17 @@ clip_rules:
   end_cue: "on the result flash, before any dissolve"
 
 saved_prompts: ["Longest counter chain", "Finisher", "Phase change"]
-tag_recipe: [topic_variants, subject_names, difficulty_terms, questline_area, mechanics, protagonist, studio, channel]
-banned_tags: [soulslike]      # removed automatically; delete the entry if the tag is accurate
+tag_recipe: [topic_variants, subject_names, difficulty_terms, questline_area, mechanics, protagonist, platforms, studio, related_games, channel]
+banned_tags:                  # removed automatically unless research says the label is accurate
+  - {tag: soulslike, unless: {research: is_soulslike, op: eq, value: true}}
+search_seeds: ["{topic} boss", "{topic} bosses", "{topic} {name} boss fight", "how to beat {name}"]   # 7.7.1
+search_fit: "This video is one boss fight ... 'boss fight' and 'how to beat' fit; 'walkthrough' does not."
+fallback_hashtags: ["#BossFight", "#Gameplay"]
+playlist_name: "{topic} — All Boss Fights"
 
 slots:                        # text the writer model fills (7.8)
   hook_line: "1 to 2 sentences that open the description and restate the title's promise in plain words."
+  search_tail: "2 to 4 words players search with this boss (questline, area or nickname); not Boss or Fight."
   body_paragraph: "3 to 5 sentences on the tactics that worked, in first person."
   tip: "One specific tip that pays off during the clip, 2 sentences."
   plain_hook: "On-screen text in plain language with a number, no niche jargon."
@@ -406,12 +422,13 @@ facts: []
 research_fields:
   - {key: canonical_name}
   - {key: summary}
+  - {key: nicknames, label: Nicknames}   # names searched besides the official one (7.7.1)
 credit_fields: []
 hooks: []
 thumbnail_words: []
 title_patterns:
-  recommended: "{topic} {subject} - {hook}"
-  alternates: ["{subject}: {what_happens}"]
+  recommended: "{topic} - {subject}: {hook}"
+  alternates: ["{subject}: {title_angle}"]   # title_angle: a 3-6 word slot; what_happens is too long for a title
 claim_rules: []
 clip_rules: {lead_in_s: 0.5, tail_s: 0.5}
 saved_prompts: ["Best 30 seconds", "Opening", "Ending"]
@@ -715,6 +732,19 @@ Two jobs. Results are stored by subject and topic keys, so another video on the 
 - **Effective value** = the user's override if there is one; otherwise the research value. For a field marked `needs_credible_source`, a research value with no credible source counts as unknown: it is shown, flagged "No credible source", left out of generated text, and cannot unlock a claim until the user sets it.
 - Canonical spelling: if the user's `subject` differs from the canonical name, apply the correction, show it ("Corrected from …") and offer a one-click revert. Reverting stores the user's spelling as the `canonical_name` override, so later runs do not correct it again. A corrected subject still finds its research row (rows are also matched by their canonical name).
 
+#### 7.7.1 Search demand (as built, `services/search_demand.py`)
+
+The package is chosen by what people actually type into YouTube, not by the writer's guess. Tested on 2026-11-15 before building: "phantom blade zero hua qianxiao", "… sword fanatic" and "… drunk boss" are real top suggestions; "phantom blade zero boss fight" is the game's top one; nothing exists for "Zhuo Bi" or "Gatekeeper" with the game; and the bare names "sword fanatic" (a manhwa), "drunk boss" (a trope) and "zhuo bi" (a song) return 0 of 10 suggestions about the game.
+
+- **Source.** YouTube search suggestions (`suggestqueries.google.com`, `ds=yt`): free, no key, ordered by popularity. Unofficial, so every failure is soft: the package then uses the writer's choices and says there is no search data. Only the topic and the subject's names are sent. `SEARCH_DEMAND=off` turns it off. The rank is a demand signal, not a view count; competition (who already ranks) needs the YouTube Data API and stays with similar-video research below.
+- **Harvest.** After each research run (and in a package run when the last harvest is over 7 days old). Names: the subject, the canonical name and its comma parts, real name, epithet, `nicknames` and the user's spelling before correction, up to 5. Seeds: the topic, `topic + name`, `topic + name + space`, the bare name, plus the preset's `search_seeds` (boss fight: `{topic} boss`, `{topic} bosses`, `{topic} {name} boss fight`, `how to beat {name}`), at most 40 requests, spaced out. Stored as a `research` row with `kind = search_demand` beside the subject's row.
+- **Reading it.** Demand = 1.0 for a top suggestion down to 0.1 for the tenth, +0.05 for each extra seed that found it. A bare name is **ambiguous** when it has 3+ suggestions and under 30% mention the topic. Candidate phrases must name the topic, or a subject name that is not ambiguous (so "drunk boss manga" and "sekiro how to beat drunk boss" are out). A phrase carrying a claim that is not backed (for example "no hit") is excluded with the reason.
+- **Fit (the writer).** The writer call gets the phrases with their rank and marks each `fits` only if someone typing it would want this exact video; the preset's `search_fit` says which generic phrases describe its kind of video (boss fight: "boss fight", "how to beat" fit; "walkthrough", "all bosses" do not). Code uses only fitting phrases.
+- **Title (code).** Every candidate is scored: the sum of demand over the fitting phrases it covers (1.0 if their words appear in order, 0.6 in any order), a match ending past 60 characters counts 70%, each repeated word costs 15%, every character past 70 costs 2% (down to half), a title the claim and number rules would block scores 0, and each warning it would draw costs 20%. On a `search_first` channel the best-scoring candidate becomes the title; a tie keeps the writer's pick. `seo.picked_by` says which happened. On `hook_first` the writer's pick stands.
+- **Tags (code).** Up to 8 fitting phrases first, most popular first, then the writer's tags; tags that differ only by small words are one tag; bare ambiguous names are dropped (the topic-anchored form stays); then the 500-character fit.
+- **Hashtags (rule).** A hashtag of an ambiguous bare name sends viewers to the wrong page (#SwordFanatic is a manhwa): it is swapped for the preset's `fallback_hashtags` (boss fight: `#BossFight`, `#Gameplay`) or dropped.
+- **Shown.** `fields.seo` keeps the phrases (fit, in title, in tags), every candidate's score, the current title's score against the best, and the ambiguous names; the Markdown export has a "Search demand" section. Measured live: Gate Keeper's title moved from the writer's 84-character "…Boss Fight (Ghoststep Counters and Parries)" to "Phantom Blade Zero Zhuo Bi, the Gatekeeper Boss Fight | Village of Lu" (covers "phantom blade zero boss fight"); Sword Fanatic's carries "hua qianxiao", "sword fanatic" and "drunk boss" with the game name.
+
 **Similar-video research.** Requires `YOUTUBE_API_KEY`; without it, show a manual-entry state.
 - Query: preset-built search phrase (General: `{topic} {subject}`; boss fight: `{topic} {subject} boss fight`).
 - YouTube Data API: `search.list` (expensive in quota; cache hard, one call per subject per day) then `videos.list` and `channels.list` for stats.
@@ -736,7 +766,7 @@ One generation call per platform, text model, JSON output, built from: channel p
 | Slot | Any name under the preset's `slots` | Writer model, following the slot's instruction |
 
 - `{full_video_ref}` is the source video's published URL if set, else the topic's playlist URL, else a line naming the channel.
-- `{credit_block}` is built from the preset's `credit_fields`.
+- `{credit_block}` is built from the preset's `credit_lines` (boss fight: "Boss: {real_name} ({epithet})", "Game: {topic} ({platforms}, {studio})"; a line whose first variable is empty is left out, and an empty variable takes its comma or brackets with it), or from `credit_fields` as "Label: value" lines when there are none.
 - A line whose built-in variable is empty is dropped, along with a heading that would be left alone (for example `CHAPTERS`). An empty variable inside a title is removed with its adjoining separator.
 - The writer model returns slot values and a hook choice, never the assembled template. Code assembles the text. This keeps claims out of free text as far as possible (D10).
 - As built (Phase 1 step 6, `services/packaging.py`): code first builds every title candidate (each pattern, once per eligible hook where it uses `{hook}`) and sends them to the writer with the confirmed facts, effective research, a timeline summary, the eligible hooks and the claim phrases that may not be used. One Claude call (structured output, `WriterOut`) returns the slot values, a claim-free phrase for `{hook}` when no hook is eligible, the recommended candidate id, a why and goal per candidate, tags, hashtags, `opening_5s`, `pinned_comment`, `community_post` and thumbnail frames and prompt. Code renders titles, the description, chapters and the credit block; thumbnail words come only from eligible hooks and the preset (the writer's words are used only when there are none). Measured on Gate Keeper: 3.8k tokens in, 2k out, 22 s, about $0.05.
@@ -750,8 +780,8 @@ One generation call per platform, text model, JSON output, built from: channel p
 | `title_alternates` | 3–4, each with `why` (one line) and `goal`. Offer one alternate per eligible hook where the pattern uses `{hook}` |
 | `description` | Rendered from `description_template` |
 | `hook_line` | First 1–2 sentences |
-| `chapters` | From `section` segment boundaries. First at 0:00, at least 3, each 10+ s apart. If the video cannot give three valid chapters, leave them out |
-| `tags` | About 20, ordered by the preset's `tag_recipe`; `banned_tags` removed |
+| `chapters` | From `section` segment boundaries. First at 0:00, at least 3, each 10+ s apart, and the last one 10+ s before the end (a section closer to the end joins the chapter before it). If the video cannot give three valid chapters, leave them out |
+| `tags` | About 20, ordered by the preset's `tag_recipe`; `banned_tags` removed; tags past the 500-character total dropped from the end |
 | `hashtags` | Exactly 3 |
 | `credit_block` | From `credit_fields` |
 | `opening_5s` | What moment to open on or cut |
@@ -759,7 +789,7 @@ One generation call per platform, text model, JSON output, built from: channel p
 | `end_screen_target` | A specific past upload, never the channel page. With no past uploads recorded, the topic's playlist, with a note to add past uploads |
 | `community_post` | Poll or teaser for the day before or after |
 | `thumbnail` | `{frame_ts: [..], word_options: [..], text_style, prompt}` (D11). Word options come from eligible hooks' `thumbnail_word` plus the preset's `thumbnail_words` |
-| `checklist` | Category, captions, end screen, pinned comment, Short cut |
+| `checklist` | Category, captions, end screen, pinned comment, Short cut (the first peak widened to 20–60 s inside the video) |
 
 **Shorts:** `title` (short, first-person, one emoji, topic hashtag), `description` from the preset's `templates.shorts_description` (a tip must pay off during the clip), 5 hashtags including `#Shorts`.
 
@@ -790,15 +820,19 @@ Pure Python, deterministic, no LLM. Runs after every generation and every manual
 | `number_needs_fact` | Any number in a title, hook, thumbnail word or on-screen text equals a confirmed fact value, or is part of the topic or subject name | warn |
 | `canonical_spelling` | Subject spelling matches the effective research value | auto-fix, shown, revertible |
 | `search_first_title` | In `search_first` mode, topic and subject lead the title. Compared after normalising case and punctuation; skipped when the topic is empty | warn |
-| `chapters_valid` | If chapters are present: first 0:00, at least 3, each 10+ s apart. No chapters passes with a note | block |
+| `chapters_valid` | If chapters are present: first 0:00, at least 3, each 10+ s apart, the last 10+ s long. No chapters passes with a note | block |
 | `hashtag_count` | Matches channel profile per platform; Shorts includes `#Shorts` | auto-fix |
 | `tags_count` | Within ±5 of `tags_target` | warn |
-| `banned_tags` | No tag from the preset's `banned_tags` | auto-fix, shown |
+| `banned_tags` | No tag containing a banned tag in force (any spelling: "Souls-like"). A ban with `unless` lifts when research backs the label (boss fight: `soulslike` unless `is_soulslike`) | auto-fix, shown |
+| `tags_fit` | Tags fit the platform's total length; the last ones are dropped until they do | auto-fix, shown |
+| `ambiguous_names` | No bare tag or hashtag of a name mostly searched for something else (7.7.1); hashtags get the preset's fallback | auto-fix, shown |
+| `search_demand` | The title and the description's first 150 characters carry at least one of the top 3 fitting search phrases (7.7.1). No search data passes with a note | warn |
+| `playlist` | The topic has a playlist in `channel.yaml`; otherwise suggest the preset's `playlist_name` | warn |
 | `cannibalization` | Subject already in past uploads without a distinct angle. Passes with "No past uploads recorded" when the list is empty | warn |
 | `link_back` | Short-form packages include the full-video, playlist or channel reference | block (TikTok: warn, until its conventions exist) |
 | `length_limits` | Per-platform character limits from a config table (verify limits at build time) | block |
 
-Preset `claim_rules` are evaluated by `claim_needs_fact`. Match phrases case-insensitively on word boundaries. As built, `claim_needs_fact` also checks the description (written from slots), since a slot could carry a claim. `canonical_spelling` rewrites any spelling of the researched name (case, spaces, hyphens) to the canonical one. Auto-fixes report `fixed: true` with what changed; `length_limits` uses title 100, description 5,000 and tags 500 characters (tags counted with separators, a tag with a space as if quoted).
+Preset `claim_rules` are evaluated by `claim_needs_fact`. Match phrases case-insensitively on word boundaries. As built, `claim_needs_fact` also checks the description (written from slots), since a slot could carry a claim. `canonical_spelling` rewrites any spelling of the researched name (case, spaces, hyphens) to the canonical one. Auto-fixes report `fixed: true` with what changed; `length_limits` uses title 100, description 5,000 and tags 500 characters (tags counted with separators, a tag with a space as if quoted); an alternate title over 100 characters gets a warn, since it cannot be picked as the title.
 
 Not rules:
 
@@ -848,6 +882,75 @@ Re-analysis runs when the user asks for it or accepts "Re-analyze with this pres
 - The dialog has one checkbox, off by default: "Also discard my edits and confirmations".
 - After re-analysis, a confirmed derived fact whose event count no longer matches shows the "fact may be out of date" warning.
 
+### 7.13 Thumbnail creator (D26; as built: `services/thumbnails.py`, `services/thumbnail_jobs.py`, `services/higgsfield.py`)
+
+The owner's flow before the app: upload a gameplay frame to Higgsfield, generate at 16:9, check faces, hands and leftover HUD, and rebuild at 9:16 for Stories. The app runs the same flow with fewer chances to go wrong.
+
+**Source.** One of three:
+1. A frame the **frame finder** suggests (7.13.1).
+2. Any moment picked on the filmstrip. The frame is cut from the original file at up to 1920 px wide, not from the 720p proxy.
+3. An image the user uploads (JPEG, PNG or WebP, at least 640×360, up to 20 MB).
+
+**Generation** (`thumbnail` job). One Generate click makes a batch: one image per chosen model × aspect (up to four models, to compare them on the same source). For each image:
+1. Cut or read the source. Upload it once per batch to Higgsfield (`/files/generate-upload-url`, then a PUT to the presigned URL without our credentials).
+2. Ask `/estimate/<model>` for the price, then submit with an `Idempotency-Key`. Poll the status (2 s, ×1.5, capped at 10 s, with jitter; 10-minute limit, then cancel).
+3. Download the result straight away; Higgsfield deletes outputs after seven days.
+4. A result identical to the source counts as a failure. `nsfw`, `failed` and cancelled requests are not charged and show their reason.
+5. Fit the result to 1280×720 (16:9) or 1080×1920 (9:16), draw the word, and save as JPEG under YouTube's 2 MB limit.
+6. Review it (below).
+
+**The word.**
+- The choices come from the package's `thumbnail.word_options`. Blocked ones are left out, and each hook's word keeps its `thumbnail_text_style`.
+- A word the user types runs through the claim and number rules first. A block refuses it before any paid call.
+- `text_mode: app` (default): the prompt tells the model to leave the chosen corner clear and add no text, and LazyCut draws the word in Bebas Neue (or Montserrat, League Spartan, DejaVu), with a heavy outline and a soft shadow.
+  - Why: exact spelling, the same template on every video (the playbook's "consistent template"), and a free redraw. Changing the word, corner, font or style re-renders from the stored raw image with no model call; the review is marked stale.
+  - On 9:16 the word is centred and kept inside `vertical_safe_margins`.
+- `text_mode: model`: the model draws the word itself, and the prompt spells it out.
+
+**The corner.** `auto` uses the free corner the frame finder found for that moment (Claude's pick, else the calmest corner by edge density); without one, top right.
+
+**Review.**
+- Claude compares the source and the result, with seven checks, each ok or not with a short note: faces, hands, hud (anything left), text (exact spelling and readable at phone size), likeness (boss and player still match), artifacts, and placement (the word does not cover a face, the subject or a weapon; the channel's `thumbnail_style.avoid` is included).
+- Code adds two checks: file size and dimensions, and how busy the area behind the word is.
+- The review is advice, not a block. "Review again" re-runs it after a redraw.
+
+**Choosing.** One chosen thumbnail per aspect. Download names follow the export: `{Channel}_{Topic}_{Subject}_thumbnail_16x9.jpg`.
+
+**Settings** (`config/thumbnails.yaml`, plus the Advanced settings page).
+- The YAML lists the models that edit from a source image, each with its endpoint path, its image field, default params and the allowed options. As of 2026-11-15: Grok Image 2.0, Qwen Image 3 Edit, Ideogram 4.0, Marketing Studio Image.
+- It also holds the prompt template and its text and framing lines.
+- The page saves overrides in the `app_setting` table: model, per-model options (checked against the YAML's `options`), text mode, review on or off, corner, font, default aspects, and a custom prompt template. Delete resets to the YAML.
+- A custom prompt can also be given for one run.
+- Template variables: `{topic} {subject} {word} {text_style} {text_corner} {aspect} {avoid}`. Unknown braces are left as typed.
+
+**Cost.** Each image is a paid Higgsfield call. The page shows the estimate before Generate, and each thumbnail stores the quoted price. Calls are logged in `llm_call` with `provider = higgsfield`. Claude's frame ranking and each review are small vision calls.
+
+#### 7.13.1 Frame finder (`thumbnail_frames` job)
+
+1. **Candidate moments** (up to 24, at least 1 s apart), each with its reason. In order:
+   - the writer's `thumbnail.frame_ts`
+   - peak segments
+   - high-intensity events
+   - the busiest intensity samples
+   - evenly spaced fill
+2. **Code scores** three frames around each candidate (−0.4, 0, +0.4 s; 480 px, from the proxy). Each metric is compared against the video's own 90th percentile:
+   - sharpness (Laplacian variance) 45%
+   - contrast 25%
+   - colourfulness 15%
+   - drama (intensity nearby) 15%
+   - Very dark or blown-out frames lose half.
+   - Only the best of the three frames around each moment is kept.
+   - Near-duplicates keep only the best: frames under 3 s apart that look alike (dHash within 6 bits), or frames anywhere that look the same (within 2 bits). A fixed-camera arena looks alike all fight long, so time apart keeps those.
+3. **Claude ranks** the top 8 as stills (640 px). For each frame it gives:
+   - a 0–10 score
+   - whether the subject is visible
+   - HUD level
+   - the calmest corner
+   - a short reason
+
+   Final score = 60% Claude + 40% code. Without a Claude key the code ranking stands. Claude reads stills only; Gemini still does all video watching (D24).
+4. The result is saved as `thumbs/frames.json` in the video's media folder.
+
 ---
 
 ## 8. API
@@ -893,10 +996,20 @@ Served at the root of `http://localhost:8000`. JSON unless noted. All list endpo
 | POST | `/packages/{id}/regenerate` | `{field}` or `{all: true, replace_edits: false}` |
 | GET | `/videos/{id}/export.md` | Markdown export of all packages |
 | GET | `/library` · POST · PATCH · DELETE | Past uploads |
+| GET | `/videos/{id}/thumbnails` | Thumbnails (newest first), word choices, found frames, uploads, settings, whether generation is possible |
+| POST | `/videos/{id}/thumbnails/frames` | Run the frame finder (7.13.1) → job |
+| POST | `/videos/{id}/thumbnails/uploads` | Raw image body (`Content-Type` image/jpeg, png or webp) → `{id, url}`; GET `/videos/{id}/thumbnails/uploads/{name}` serves it |
+| POST | `/videos/{id}/thumbnails` | `{source: {kind: frame, t} \| {kind: upload, upload_id}, models?, aspects?, word?, text_style?, text_corner?, text_mode?, prompt?}` → batch + job |
+| PATCH | `/thumbnails/{id}` | `{chosen?, word?, text_style?, text_corner?, font?}`; changing the text redraws for free |
+| POST | `/thumbnails/{id}/review` | Review again → job |
+| GET | `/thumbnails/{id}/image` | `?v=final\|raw\|source&download=` |
+| DELETE | `/thumbnails/{id}` | Remove one |
+| GET | `/settings/thumbnails` · PUT · DELETE | Advanced settings for thumbnails; DELETE resets to `config/thumbnails.yaml` |
+| POST | `/settings/thumbnails/estimate` | `{models?, aspects?}` → Higgsfield's price quote per image (no charge) |
 | GET | `/jobs/{id}` · POST `/jobs/{id}/retry` | Job status / retry |
 | GET | `/videos/{id}/updates` | SSE: job progress and incremental results |
 
-SSE event types: `job.progress`, `job.done`, `job.error`, `analysis.event` (one per timeline event, sent in time order after the analysis call returns), `clip.candidate`, `package.field`. On page load the client fetches current state first and then subscribes; the stream carries no history.
+SSE event types: `job.progress`, `job.done`, `job.error`, `analysis.event` (one per timeline event, sent in time order after the analysis call returns), `clip.candidate`, `package.field`, `thumbnail.updated` (one thumbnail row), `thumbnail.frames` (the frame finder's result). On page load the client fetches current state first and then subscribes; the stream carries no history.
 
 Markdown export filename: `{Channel}_{Topic}_{Subject}_YouTube_SEO.md`, with spaces and the characters `< > : " / \ | ? *` removed so the name is valid on Windows.
 
@@ -1112,7 +1225,7 @@ The original plan for this phase, kept for reference:
 
 **Phase 1 — Understand and package**
 
-Status on 2026-11-15: steps 1 to 7 are built (step 7: past uploads typed in by hand, "Mark as published" and "Unpublish"; step 4: event editing with undo, review mode, facts confirmation; schema version 3 adds `event.edited`. Step 5: subject research with sources, overrides, spelling correction and the paste fallback. Step 6: the YouTube long-form package, template variables, the rules engine, the package panel and drawer, Markdown export). Not yet built from those steps: `PUT /config/channel` and the preset write endpoints (the preset editor is Phase 3). The API payloads are in `api/API_SHAPES.md`.
+Status on 2026-11-15: steps 1 to 7 are built (step 7: past uploads typed in by hand, "Mark as published" and "Unpublish"; step 4: event editing with undo, review mode, facts confirmation; schema version 3 adds `event.edited`. Step 5: subject research with sources, overrides, spelling correction and the paste fallback. Step 6: the YouTube long-form package, template variables, the rules engine, the package panel and drawer, Markdown export). Not yet built from those steps: `PUT /config/channel` and the preset write endpoints (the preset editor is Phase 3). Since then: search demand (7.7.1) picks titles and tags from measured YouTube search suggestions, with the owner's SEO playbook in the boss-fight preset. Also built: the thumbnail creator (7.13, from Phase 3). The API payloads are in `api/API_SHAPES.md`.
 
 Build in this order; each step is usable on its own.
 
@@ -1136,7 +1249,7 @@ Build in this order; each step is usable on its own.
 - Competitor research with YouTube Data API and caching; gap analysis; cannibalization.
 - Past uploads imported from the YouTube channel.
 - Google Drive import source.
-- Thumbnail page: frame picker, result words, prompt builder.
+- Thumbnail page: frame picker, result words, prompt builder. **Built early (2026-11-15) as the thumbnail creator (7.13, D26)**, with Higgsfield generation, the frame finder, uploads, the word overlay, Claude review and an Advanced settings page.
 - Preset form editor.
 
 **Phase 4 — Loop and plan (later)**
@@ -1176,7 +1289,7 @@ Build in this order; each step is usable on its own.
 1. Artboard 5 of the design canvas ("Ink style, editor-like workspace") is the approved direction. The companion mockup file is that artboard.
 2. Heading font: keep the mockup's serif or swap for a Latin-only serif.
 3. TikTok conventions are undefined; v1 mirrors the Reel package.
-4. Thumbnail generation stays outside the app in v1 (prompt export only).
+4. ~~Thumbnail generation stays outside the app in v1.~~ Replaced by D26 on 2026-11-15: thumbnails are generated through Higgsfield's API. Higgsfield's API balance is pay-as-you-go and may be separate from the web plan. Models that are on the web app but not on the API are not available, including Nano Banana and GPT Image (as of 2026-11-15).
 5. Research uses Claude's web search tool (D24). Measured on 2026-11-15 (Gate Keeper, `claude-opus-5-5`): the search call read 57k tokens in and wrote 2.9k out in 41 s, the structuring call 4.3k in and 1.1k out in 9 s; about $0.35–0.40 per run including searches ($10 per 1,000, at most 6 per run). Research runs once per subject and is reused.
 6. The Onimusha playlist id in `channel.yaml` is flagged by the owner as possibly clipped; verify before relying on it.
 7. Hook wording in the boss-fight preset is "No Hit" (the owner's current usage), with "NO HIT" as the thumbnail word. Earlier drafts used "No Damage". The owner can change it in the YAML.
@@ -1188,6 +1301,9 @@ Build in this order; each step is usable on its own.
 13. The app copies an imported file rather than moving it; the original stays in the import folder.
 14. A hit means the player's health dropped, as the boss-fight preset says. On the Phase 0 review the owner also confirmed six hits where the health bar did not move and rejected one measured drop. Until the owner says otherwise, the `hits_taken` fact counts health drops only.
 15. The 1 fps default is what was measured, not what was found best. Higher sampling rates and `high` resolution are untested.
+16. Search demand comes from YouTube's unofficial suggestion endpoint (7.7.1). It can change or stop without notice; the app then falls back to the writer's choices. A suggestion's rank is a popularity signal, not search volume.
+17. On a search-first channel, code overrides the writer's title pick with the best search score. The owner can always pick another title; the `search_demand` rule warns when an edit drops every top phrase.
+18. The default thumbnail model is Grok Image 2.0, picked from one comparison on 2026-11-16: the same Gate Keeper frame (0:10), the same preset prompt, 16:9, all four models. Grok ($0.09) kept the boss and player most faithful and removed all HUD. Qwen Image 3 Edit ($0.075) also passed and added moodier light; it is the cheaper alternative. Marketing Studio ($0.265) gave the most cinematic golden-hour look at three times the price. Ideogram 4.0 ($0.10) failed: it repainted the HUD and boss name and recoloured the bronze mask gold. One frame is a small sample, so recompare on a different game. Prices come from Higgsfield's estimate endpoint, and no per-image price is published.
 
 ---
 

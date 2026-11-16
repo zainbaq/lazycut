@@ -192,6 +192,46 @@ class LibraryItem(SQLModel, table=True):
     published_at: str | None = None
 
 
+class Thumbnail(SQLModel, table=True):
+    """One generated thumbnail (7.13): its source, the request sent to the image model, the result and its review."""
+
+    id: str = Field(default_factory=new_id, primary_key=True)
+    video_id: str = Field(foreign_key="video.id", index=True, ondelete="CASCADE")
+    batch_id: str = ""               # thumbnails made by one Generate click (several models or aspects)
+    source_kind: str = "frame"       # frame | upload
+    source_t: float | None = None
+    source_path: str = ""
+    aspect: str = "16:9"
+    model: str = ""                  # the id in config/thumbnails.yaml
+    params: dict = _json({})
+    prompt: str = ""
+    custom_prompt: bool = False
+    text_mode: str = "app"           # app | model
+    word: str = ""
+    text_style: str = ""
+    text_corner: str = "top_right"
+    font: str = "bebas"
+    status: str = "queued"           # queued | running | done | failed | nsfw
+    request_id: str | None = None
+    raw_path: str | None = None      # the image as the model returned it
+    final_path: str | None = None    # sized for the platform, with the word drawn when text_mode is app
+    review: dict | None = _json()
+    cost_usd: float | None = None
+    chosen: bool = False
+    error: str | None = None
+    created_at: str = Field(default_factory=utc_now)
+
+
+class AppSetting(SQLModel, table=True):
+    """Settings the app's own pages change (Advanced settings), layered over the YAML defaults."""
+
+    __tablename__ = "app_setting"
+
+    key: str = Field(primary_key=True)
+    value: dict = _json({})
+    updated_at: str = Field(default_factory=utc_now)
+
+
 class LLMCall(SQLModel, table=True):
     __tablename__ = "llm_call"
 

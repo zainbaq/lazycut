@@ -1,0 +1,67 @@
+# Thumbnail creator (BUILD_SPEC 7.13). Image generation runs on Higgsfield's API
+# (HIGGSFIELD_API_KEY in .env). Only models that edit from a
+# source image are listed: the thumbnail always starts from your frame or upload.
+#
+# The Advanced settings page picks the model and its options and can override the
+# prompt; what it saves is kept in the database, on top of these defaults.
+
+default_model: grok_image_2   # won the 2026-11-16 comparison (BUILD_SPEC assumption 18); qwen_image_3_edit is the cheaper runner-up
+text_mode: app            # app: LazyCut draws the word (exact spelling, same template every video) | model: the image model draws it
+review: true              # Claude checks each result for faces, hands, leftover HUD and text
+text_corner: auto         # auto (the frame finder's free corner) | top_left | top_right | bottom_left | bottom_right
+font: bebas               # bebas | montserrat | league_spartan | dejavu
+aspects: ["16:9"]         # add "9:16" to also make the Stories version
+
+models:
+  grok_image_2:
+    label: Grok Image 2.0
+    path: xai/grok-imagine-image-2.0
+    image_field: image_urls          # a list field
+    params: {resolution: "2k", quality: "medium"}
+    options:
+      resolution: ["1k", "2k"]
+      quality: ["low", "medium"]
+  qwen_image_3_edit:
+    label: Qwen Image 3 Edit
+    path: alibaba/qwen-image-3/edit
+    image_field: image_urls
+    negative_field: negative_prompt
+    params: {resolution: "2k", prompt_extend: true, enable_thinking: true}
+    options:
+      resolution: ["1k", "2k"]
+      enable_thinking: [true, false]
+  ideogram_4:
+    label: Ideogram 4.0
+    path: ideogram/v4.0
+    image_field: image_url           # a single URL
+    params: {rendering_speed: "QUALITY", image_weight: 70}
+    options:
+      rendering_speed: ["TURBO", "DEFAULT", "QUALITY"]
+      image_weight: [40, 55, 70, 85]
+  marketing_studio:
+    label: Marketing Studio Image
+    path: marketing-studio/image
+    image_field: image_urls
+    params: {quality: "high", resolution: "2k", moderation: "auto"}
+    options:
+      quality: ["low", "medium", "high"]
+      resolution: ["1k", "2k", "4k"]
+
+# Variables: {topic} {subject} {word} {text_style} {text_corner} {aspect} {avoid}
+# {text_instruction} and {framing} are filled from text_mode and the aspect.
+prompt: |-
+  Turn this gameplay frame from {topic} into a striking YouTube thumbnail, {aspect}.
+  Keep {subject} and the player character exactly as they appear in the frame: same design, armour, weapons, colours and pose. Keep the setting recognisable.
+  Remove every piece of game HUD: health and stamina bars, boss name bars, button prompts, subtitles, damage numbers, minimap and item slots.
+  Make it cinematic: dramatic lighting, strong contrast, crisp detail, and a subtle rim light that separates the characters from the background. Push the colour slightly; no blur.
+  {framing}
+  {text_instruction}
+  Faces and hands must be anatomically correct, with no extra limbs or weapons. No watermark, logo or border.
+
+text_instruction:
+  app: "Do not add any text, letters, numbers or logos. Keep the {text_corner} area free of important detail so a word can be placed there."
+  model: 'Add the words "{word}" in huge bold letters, {text_style}, in the {text_corner}. Spell it exactly "{word}" and add no other text.'
+
+framing:
+  "16:9": "Frame it wide, with the main clash in the middle third."
+  "9:16": "Frame it tall for a phone. Keep the main subject in the centre, and keep the top 12% and bottom 15% free of important detail."

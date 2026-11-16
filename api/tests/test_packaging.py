@@ -1,5 +1,6 @@
 """Packaging: templates and conditions, the rules engine, and the package API with a fake writer."""
 
+import re
 import shutil
 import time
 from pathlib import Path
@@ -11,6 +12,7 @@ from app.db import session
 from app.models import Event, Fact, LibraryItem, Research, Segment, Video
 from app.services.llm.base import LLMResult
 from app.services.packaging import (
+    PhraseFit,
     SlotValue,
     ThumbnailIdea,
     TitleNote,
@@ -18,10 +20,11 @@ from app.services.packaging import (
     chapter_list,
     export_filename,
     parse_chapters,
+    short_window,
 )
 from app.services.presets import ChannelProfile, Condition, load_presets
 from app.services.research import name_key
-from app.services.rules import RuleContext, check
+from app.services.rules import RuleContext, _tags_length, check
 from app.services.templating import holds, render_block, render_title
 
 CONFIG = Path(__file__).resolve().parents[2] / "config"
@@ -65,6 +68,19 @@ def test_chapters_need_three_sections_ten_seconds_apart():
     chapters = chapter_list([seg(2.0, "Intro"), seg(5.0, "Too close"), seg(40.0, "Phase two"), seg(90.0, "Finisher")])
     assert chapters == [{"t": 0.0, "label": "Intro"}, {"t": 40.0, "label": "Phase two"}, {"t": 90.0, "label": "Finisher"}]
     assert chapter_list([seg(0, "a"), seg(30, "b")]) == []
+    # A section starting less than 10 s before the end joins the chapter before it (YouTube rejects it).
+    tail = [seg(0, "a"), seg(65, "b"), seg(155, "c"), seg(213, "Loot")]
+    assert [c["label"] for c in chapter_list(tail, duration_s=216.9)] == ["a", "b", "c"]
+    assert [c["label"] for c in chapter_list(tail)] == ["a", "b", "c", "Loot"]
+
+
+def test_short_window_is_twenty_to_sixty_seconds_inside_the_video():
+    def peak(a, b):
+        return Segment(video_id="v", kind="peak", t_start=a, t_end=b)
+    assert short_window(peak(210.5, 212.5), 216.9) == (196.9, 216.9)
+    assert short_window(peak(1.0, 3.0), 216.9) == (0.0, 20.0)
+    assert short_window(peak(50.0, 80.0), 216.9) == (50.0, 80.0)
+    assert short_window(peak(10.0, 100.0), 216.9) == (10.0, 70.0)
     assert parse_chapters("0:00 Intro\n1:02:03 Late\nnot a chapter") == [
         {"t": 0.0, "label": "Intro"}, {"t": 3723.0, "label": "Late"},
     ]
@@ -135,9 +151,33 @@ def test_chapters_length_cannibalization_and_dismissals():
     assert r["tags_count:tags"]["dismissed"] is True and r["search_first_title:title"]["dismissed"] is False
 
 
+def test_tags_past_the_limit_are_dropped_from_the_end():
+    long_tags = [f"Phantom Blade Zero tag number {i:02d}" for i in range(20)]  # 34 characters each, quoted
+    fixed, results = check(fields(tags=long_tags), ctx())
+    r = by_key(results)
+    assert fixed["tags"] == long_tags[:14] and _tags_length(fixed["tags"]) <= 500
+    assert r["tags_fit:tags"]["fixed"] and r["tags_fit:tags"]["evidence"] == long_tags[14:]
+    assert "length_limits:tags" not in r
+    _, short = check(fields(), ctx())
+    assert "tags_fit:tags" not in by_key(short)
+
+
+def test_last_chapter_and_long_alternates():
+    chapters = [{"t": 0.0, "label": "a"}, {"t": 65.0, "label": "b"}, {"t": 213.0, "label": "c"}]
+    _, results = check(fields(chapter_list=chapters, title_alternates=[{"text": "y" * 101}]), ctx(duration_s=216.9))
+    r = by_key(results)
+    assert r["chapters_valid:chapters"]["severity"] == "block"
+    assert "last chapter" in r["chapters_valid:chapters"]["message"]
+    assert r["length_limits:title_alternates[0]"]["severity"] == "warn"
+    _, ok = check(fields(chapter_list=chapters[:2] + [{"t": 150.0, "label": "c"}]), ctx(duration_s=216.9))
+    assert by_key(ok)["chapters_valid:chapters"]["severity"] == "pass"
+
+
 def test_export_filename_is_windows_safe():
     video = Video(title="t", topic="Phantom Blade: Zero?", subject='Zhuo "Bi"')
-    assert export_filename(channel(), video) == "TheLazyRonin_PhantomBlade:Zero_ZhuoBi_YouTube_SEO.md".replace(":", "")
+    assert export_filename(channel(), video) == "TheLazyRonin_PhantomBladeZero_ZhuoBi_YouTube_SEO.md"
+    video = Video(title="t", topic="Phantom Blade Zero", subject="Hua Qianxiao, the Sword Fanatic's")
+    assert export_filename(channel(), video) == "TheLazyRonin_PhantomBladeZero_HuaQianxiaotheSwordFanatics_YouTube_SEO.md"
 
 
 # ---- the API ----------------------------------------------------------------------
@@ -148,6 +188,7 @@ class FakeWriter:
 
     def __init__(self) -> None:
         self.prompts: list[str] = []
+        self.extra_slots: dict[str, str] = {}
 
     async def search(self, *args, **kwargs):  # research is not exercised here
         raise AssertionError("no research in these tests")
@@ -155,11 +196,15 @@ class FakeWriter:
     async def generate_json(self, prompt, schema, search=False, effort="low"):
         assert schema is WriterOut
         self.prompts.append(prompt)
-        ids = [line.split(" ")[1] for line in prompt.splitlines() if line.startswith("- t")]
+        ids = [m.group(1) for m in re.finditer(r"^- (t\d+) \(", prompt, flags=re.MULTILINE)]
+        # Search phrases ("- p3: text (suggestion #2)"): everything fits except music and trailers.
+        phrase_lines = [line[2:].split(": ", 1) for line in prompt.splitlines() if re.match(r"- p\d+: ", line)]
         out = WriterOut(
+            phrase_fit=[PhraseFit(id=i, fits=not re.search(r"music|trailer", text)) for i, text in phrase_lines],
             slots=[SlotValue(name="hook_line", value="Zhuo Bi hits like a wall, so I let him come to me."),
                    SlotValue(name="body_paragraph", value="I parried his shield combo and countered every opening."),
-                   SlotValue(name="not_a_slot", value="ignored")],
+                   SlotValue(name="not_a_slot", value="ignored")]
+            + [SlotValue(name=k, value=v) for k, v in self.extra_slots.items()],
             claim_free_hook="Shield Breaker",
             recommended_title_id=ids[-1],
             title_notes=[TitleNote(id=i, why=f"why {i}", goal="click_through") for i in ids],
@@ -258,10 +303,12 @@ def test_package_generation_edits_dismissals_staleness_and_export(client):
     assert f["hashtags"] == ["#PhantomBladeZero", "#ZhuoBi", "#BossFight"]
     assert "soulslike" not in [t.lower() for t in f["tags"]] and f["tags"].count("Zhuo Bi") == 1
     assert f["chapters"] == "0:00 Opening\n1:00 Second phase\n2:30 Finisher"
-    assert f["credit_block"] == "Real name: Zhuo Bi\nStudio: S-GAME"
+    assert f["credit_block"] == "Boss: Zhuo Bi\nGame: Phantom Blade Zero (S-GAME)"  # credit_lines; empty parts drop
+    assert f["seo"]["source"] is None and f["seo"]["picked_by"] == "writer"  # no search data in this test
+    assert any(c["item"] == "Playlist" and "All Boss Fights" in c["detail"] for c in f["checklist"])
     assert "CHAPTERS\n0:00 Opening" in f["description"] and f["description"].endswith("#PhantomBladeZero #ZhuoBi #BossFight")
     assert "Full playlist" not in f["description"]  # no playlist for this topic: the line is dropped
-    assert f["thumbnail"]["word_options"] == ["2 HITS", "2 V 1"]
+    assert f["thumbnail"]["word_options"] == ["2 HITS", "SHIELD", "2 V 1"]  # hook, writer's own, preset extra
     assert f["end_screen_target"]["kind"] == "none"
     assert pkg["stale"] is False and pkg["version"] == 1 and pkg["blocked_fields"] == []
     assert client.get(f"/videos/{video_id}").json()["display_status"] == "packaged"

@@ -147,7 +147,9 @@ Source = {url, title, domain, rating: "credible"|"unrated"}
 - `POST /videos/{id}/research` body `{}` (search the web) or `{pasted_text, source_url?}` (sort the
   user's own notes, no search) → 202 `Job` (kind `research`). 409 with no Anthropic key or when one
   is running. Import queues it automatically when the key is set and the subject has no research yet.
-  Each search run is one Claude call with web search plus one short structuring call.
+  Each search run is one Claude call with web search plus one short structuring call, then a free
+  harvest of YouTube search suggestions for the topic and subject names (stored with the research;
+  a package run refreshes it when it is older than 7 days).
 - `PATCH /videos/{id}/research` body `{key, value}` sets the user's value (`null` = "unknown"),
   `{key, restore: true}` goes back to the research value → `Research`. 422 for an unknown key or a
   wrong type (bool fields take true/false). Works without a key, so values can be typed in by hand.
@@ -183,15 +185,32 @@ PackageFields = {
   opening_5s: str, pinned_comment: str, community_post: str,
   end_screen_target: {kind: "past_upload"|"playlist"|"none", title: str|null, url: str|null, label: str},
   thumbnail: {frame_ts: [float], word_options: [str], text_style: str|null, prompt: str},
-  checklist: [{item, detail}],
-  slots: {name: text}, goals: {field: Goal}
+  checklist: [{item, detail}],     // includes "Playlist" when the topic has no playlist yet
+  slots: {name: text}, goals: {field: Goal},
+  seo: Seo                         // search demand behind the title and tags (BUILD_SPEC 7.7.1)
+}
+Seo = {
+  source: "youtube_suggest"|null,  // null: no search data; the writer's choices stand
+  harvested_at: str|null,
+  picked_by: "search_score"|"search_score_agrees"|"writer",   // who chose the title
+  phrases: [{id, text, rank: int, seen: int, demand: float, about_subject: bool,
+             fits: bool,             // the writer judged someone typing it would want this video
+             in_title: bool, in_tags: bool}],                 // what the current title and tags carry
+  excluded: [{text, demand, reason}],   // left out before judging (e.g. an unbacked claim like "no hit")
+  title_scores: [{id, text, score, demand_score, covers: [{text, demand, match: "exact"|"words", front: bool}],
+                  writer_pick: bool, issues: [str]}],         // every candidate; score includes rule penalties
+  title_score: {score, covers, best_candidate},               // the current title (after edits) vs the best
+  ambiguous_names: [str]           // bare names mostly searched for something else; never a tag or hashtag alone
 }
 Goal = "click_through"|"retention"|"session_watch_time"|"engagement"|"funnel"
 RuleResult = {key, rule_id, severity: "pass"|"warn"|"block", field, message, evidence, fixed: bool, dismissed: bool}
 ```
-Rule ids: `canonical_spelling`, `hashtag_count`, `banned_tags` (these auto-fix; `fixed: true` says what changed),
+Rule ids: `canonical_spelling`, `hashtag_count`, `banned_tags`, `tags_fit`, `ambiguous_names` (these auto-fix;
+`fixed: true` says what changed; `tags_fit` and `ambiguous_names` only appear when they changed something),
 `claim_needs_fact.<claim rule id>`, `number_needs_fact`, `search_first_title`, `chapters_valid`, `tags_count`,
-`cannibalization`, `length_limits`. `field` is a path such as `title`, `title_alternates[1]`,
+`cannibalization`, `search_demand` (title and description: warn when they miss every top fitting search phrase),
+`playlist` (warn on description: the topic has no playlist), `length_limits` (block on a field, warn on
+`title_alternates[i]`). `field` is a path such as `title`, `title_alternates[1]`,
 `thumbnail.word_options[0]`, `description`, `tags`.
 
 - `POST /videos/{id}/packages` body `{platforms: ["youtube"]}` → 202 `Job` (kind `package`). 409 with no
@@ -208,7 +227,8 @@ Rule ids: `canonical_spelling`, `hashtag_count`, `banned_tags` (these auto-fix; 
 - `POST /packages/{id}/regenerate` body `{field}` (that field only, its edit is replaced) or
   `{all: true, replace_edits: false}` (edited fields kept unless `replace_edits`) → 202 `Job`.
 - `GET /videos/{id}/export.md` → the package as Markdown, as a download named
-  `{Channel}_{Topic}_{Subject}_YouTube_SEO.md` (spaces and `< > : " / \ | ? *` removed). 404 before generation.
+  `{Channel}_{Topic}_{Subject}_YouTube_SEO.md` (letters, digits, `_` and `-` only). It includes a
+  "Search demand" section. 404 before generation.
 
 ## Past uploads and publishing (Phase 1 step 7)
 
@@ -233,6 +253,51 @@ never counted against it). They only change code-built parts, so `GET /videos/{i
 `end_screen_target`, the checklist's end-screen line and the rules for free when past uploads change; the
 package is not marked stale. Publishing does not make a package stale either.
 
+## Thumbnails (BUILD_SPEC 7.13)
+
+```
+Thumbnail = {id, video_id, batch_id, source_kind: "frame"|"upload", source_t: float|null, aspect: "16:9"|"9:16",
+             model, params: {}, prompt, custom_prompt: bool, text_mode: "app"|"model", word, text_style,
+             text_corner: "top_left"|"top_right"|"bottom_left"|"bottom_right", font,
+             status: "queued"|"running"|"done"|"failed"|"nsfw", request_id: str|null, error: str|null,
+             cost_usd: float|null,                  // Higgsfield's quote; null when none or not charged
+             chosen: bool, created_at,
+             review: null | {verdict: "ok"|"check"|null, problems: int, summary, model, stale?: bool,
+                             checks: [{id: "faces"|"hands"|"hud"|"text"|"likeness"|"artifacts"|"placement", ok, note}],
+                             code: [{id: "file"|"backdrop", ok, note}]},
+             urls: {source: str|null, raw: str|null, final: str|null}}    // relative to the API
+FoundFrame = {t, why, score, code_score, text_corner, sharpness, brightness,
+              claude: null | {score: 0-10, subject_visible, hud: "none"|"light"|"heavy", text_corner, reason}}
+ThumbSettings = {model, text_mode, review, text_corner: "auto"|corner, font, aspects: [..], prompt,
+                 custom_prompt: bool, default_prompt,
+                 models: [{id, label, path, params: {}, options: {name: [values]}}],
+                 keys: {higgsfield: bool, anthropic: bool}}      // keys only on /settings/thumbnails
+```
+
+- `GET /videos/{id}/thumbnails` → `{can_generate, missing: [str], can_review, settings: ThumbSettings,
+  words: [{word, text_style, from: "hook"|"package"}], default_text_style,
+  frames: null | {created_at, ranked_by: "claude"|"code", looked_at, frames: [FoundFrame]},
+  finding_frames: bool, running: bool, uploads: [{id, url}], thumbnails: [Thumbnail]}`.
+- `POST /videos/{id}/thumbnails/frames` → 202 `Job` (`thumbnail_frames`). 409 while importing or already running.
+- `POST /videos/{id}/thumbnails/uploads` with the image as the raw body and `Content-Type` image/jpeg, png or
+  webp → 201 `{id, url, width, height}`. 415 other types, 413 over 20 MB, 422 unreadable or under 640×360.
+- `POST /videos/{id}/thumbnails` body `{source: {kind: "frame", t} | {kind: "upload", upload_id}, models?: [id]
+  (≤ 4; default the settings' model), aspects?, word? (default the first word choice; "" for none),
+  text_style?, text_corner? ("auto" default), text_mode?, prompt? (a template for this run)}` → 202
+  `{batch_id, job: Job, thumbnails: [Thumbnail], word_issues: [RuleResult]}`. 409 without Higgsfield keys or while
+  a batch runs; 422 for an unknown model, a bad source or a word the claim rules block.
+- `PATCH /thumbnails/{id}` body any of `{chosen, word, text_style, text_corner, font}` → `Thumbnail`. Text changes
+  redraw from the raw image (no model call) and set `review.stale`; 422 when the model drew the text.
+  Choosing one clears the other chosen thumbnail of the same aspect.
+- `POST /thumbnails/{id}/review` → 202 `Job` (Claude only).
+- `GET /thumbnails/{id}/image?v=final|raw|source&download=true` → the image; with `download`, named
+  `{Channel}_{Topic}_{Subject}_thumbnail_16x9.jpg`. `DELETE /thumbnails/{id}` → 204 (409 while running).
+- `GET /settings/thumbnails` → `ThumbSettings`. `PUT` body any of `{model, params: {model_id: {option: value}},
+  text_mode, review, text_corner, font, aspects, prompt}` → `ThumbSettings` (422 for values the YAML does not allow).
+  `DELETE` resets to `config/thumbnails.yaml`.
+- `POST /settings/thumbnails/estimate` body `{models?, aspects?}` → `{estimates: [{model, aspect, usd: float|null,
+  error?}]}`; a quote is free.
+
 ## Analysis and jobs
 
 - `POST /videos/{id}/analyze` body `{discard_user_work: false}` → 202 `Job`.
@@ -251,5 +316,7 @@ package is not marked stale. Publishing does not make a package stale either.
 | `job.done` | `Job` |
 | `job.error` | `Job` |
 | `analysis.event` | `Event`, one per event in time order after an analysis is stored |
+| `thumbnail.updated` | `Thumbnail`, whenever one changes |
+| `thumbnail.frames` | the frame finder's result, as in `GET /videos/{id}/thumbnails` `frames` |
 
 A comment line (`: ping`) is sent every 15 s.

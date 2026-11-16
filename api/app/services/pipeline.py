@@ -23,7 +23,7 @@ from app.models import (
     Video,
     utc_now,
 )
-from app.services import packaging
+from app.services import packaging, search_demand
 from app.services.analysis import AnalysisRun, VideoContext
 from app.services.events import DetectionContext, MergedEvent, build_detectors, run_engine
 from app.services.events.base import CallRecord
@@ -48,6 +48,7 @@ from app.services.research import (
     find_row,
     has_results,
     rate,
+    research_view,
     search_prompt,
     structure_prompt,
     to_payload,
@@ -67,6 +68,10 @@ class Deps:
     video_provider: Callable[[Callable[[str], None]], VideoProvider | None]
     # Builds the Claude provider (search + structured answers); None when no Anthropic key is set.
     text_provider: Callable[[], Any] = lambda: None
+    # The search-suggestion client (search_demand.SuggestClient); None turns the harvest off.
+    suggest_client: Callable[[], Any] = lambda: None
+    # The image-generation client (higgsfield.ImageClient); None when no Higgsfield key is set.
+    image_client: Callable[[], Any] = lambda: None
 
     def can_watch(self) -> bool:
         return self.video_provider(lambda _msg: None) is not None
@@ -437,7 +442,46 @@ async def research_job(ctx: JobContext) -> None:
         s.add(row)
         s.commit()
     found = sum(f["value"] is not None for f in payload["fields"].values())
-    ctx.progress(1.0, f"Found {found} of {len(payload['fields'])} fields")
+    ctx.progress(0.9, f"Found {found} of {len(payload['fields'])} fields; checking what people search")
+    phrases = await harvest_demand(ctx, force=True)
+    ctx.progress(1.0, f"Found {found} of {len(payload['fields'])} fields"
+                 + (f" · {phrases} search phrases" if phrases is not None else ""))
+
+
+async def harvest_demand(ctx: JobContext, force: bool = False) -> int | None:
+    """Collect search suggestions for the video's topic and subject names (7.7.1). Free and soft:
+    returns the number of phrases kept, or None when the harvest is off, fresh enough or failed."""
+    client = deps_of(ctx).suggest_client()
+    if client is None:
+        return None
+    settings = deps_of(ctx).settings
+    with session(ctx.engine) as s:
+        video = s.get(Video, ctx.video_id)
+        if video is None or not (video.topic or video.subject):
+            return None
+        preset, _note = preset_for(settings, video.preset_id)
+        channel, _errors = load_channel(settings.config_dir)
+        row = ensure_row(s, video)
+        existing = search_demand.find_row(s, row)
+        if not force and existing and search_demand.is_fresh(existing.payload):
+            return None
+        effective = research_view(row, video, preset, channel)["effective"]
+        names = search_demand.subject_names(video.subject or video.title, effective,
+                                            (row.payload or {}).get("subject_before"))
+        topic = video.topic
+        s.commit()
+    payload = await search_demand.harvest(client, topic, names, preset.search_seeds)
+    if not payload["phrases"]:
+        log.warning("search demand: no suggestions (%s errors)", payload["errors"])
+        if existing is not None:
+            return None  # keep the last good harvest
+    with session(ctx.engine) as s:
+        video = s.get(Video, ctx.video_id)
+        if video is None:
+            return None
+        search_demand.save(s, ensure_row(s, video), payload)
+        s.commit()
+    return len(payload["phrases"])
 
 
 # ---- packaging --------------------------------------------------------------------
@@ -454,6 +498,8 @@ async def package_job(ctx: JobContext) -> None:
     provider = deps.text_provider()
     if provider is None:
         raise RuntimeError("Set ANTHROPIC_API_KEY in .env to write packages")
+    ctx.progress(0.02, "Checking what people search")
+    await harvest_demand(ctx)
     with session(ctx.engine) as s:
         video = s.get(Video, ctx.video_id)
         if video is None:
@@ -490,7 +536,8 @@ async def package_job(ctx: JobContext) -> None:
         old = dict(pkg.fields or {})
         edited = list(pkg.edited_fields or [])
         if only:
-            fields = old | {k: v for k, v in fresh.items() if k == only or (only == "title" and k.startswith("title_"))}
+            fields = old | {k: v for k, v in fresh.items()
+                            if k in (only, "seo") or (only == "title" and k.startswith("title_"))}
             if only == "chapters":
                 fields["chapter_list"] = fresh["chapter_list"]
             edited = [e for e in edited if e != only]

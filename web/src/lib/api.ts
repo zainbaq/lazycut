@@ -1,6 +1,7 @@
 // Typed client for the LazyCut API (api/API_SHAPES.md). The browser calls the API directly (D18).
 
 import type {
+  Aspect,
   ConfigStatus,
   EventPatch,
   Fact,
@@ -22,6 +23,15 @@ import type {
   Research,
   ResearchEdit,
   ResearchRun,
+  ThumbAdjust,
+  ThumbEstimate,
+  ThumbGenerate,
+  ThumbGenerateResult,
+  Thumbnail,
+  ThumbnailState,
+  ThumbSettings,
+  ThumbSettingsInput,
+  ThumbUpload,
   Timeline,
   TimelineEvent,
   Video,
@@ -121,7 +131,39 @@ export const api = {
   publish: (id: string, body: PublishBody) =>
     request<PublishedVideo>(`/videos/${id}/publish`, { method: "POST", ...json(body) }),
   unpublish: (id: string) => request<Video>(`/videos/${id}/publish`, { method: "DELETE" }),
+  // ---- thumbnails (7.13) ----
+  thumbnails: (id: string) => request<ThumbnailState>(`/videos/${id}/thumbnails`),
+  /** Scores frames in code, then a small paid Claude call ranks the best few. */
+  findFrames: (id: string) => request<Job>(`/videos/${id}/thumbnails/frames`, { method: "POST" }),
+  /** The raw file is the request body; its type is the Content-Type. */
+  uploadThumbSource: (id: string, file: File) =>
+    request<ThumbUpload>(`/videos/${id}/thumbnails/uploads`, {
+      method: "POST",
+      body: file,
+      headers: { "Content-Type": file.type },
+    }),
+  /** Each image is a paid Higgsfield call. */
+  generateThumbnails: (id: string, body: ThumbGenerate) =>
+    request<ThumbGenerateResult>(`/videos/${id}/thumbnails`, { method: "POST", ...json(body) }),
+  /** Choose, or redraw the word: free, no model call. */
+  adjustThumbnail: (id: string, body: ThumbAdjust) =>
+    request<Thumbnail>(`/thumbnails/${id}`, { method: "PATCH", ...json(body) }),
+  /** A small paid Claude call. */
+  reviewThumbnail: (id: string) => request<Job>(`/thumbnails/${id}/review`, { method: "POST" }),
+  deleteThumbnail: (id: string) => request<void>(`/thumbnails/${id}`, { method: "DELETE" }),
+  thumbSettings: () => request<ThumbSettings>("/settings/thumbnails"),
+  saveThumbSettings: (body: ThumbSettingsInput) =>
+    request<ThumbSettings>("/settings/thumbnails", { method: "PUT", ...json(body) }),
+  resetThumbSettings: () => request<ThumbSettings>("/settings/thumbnails", { method: "DELETE" }),
+  /** Higgsfield's price quote; no charge. */
+  estimateThumbnails: (body: { models?: string[]; aspects?: Aspect[] }) =>
+    request<{ estimates: ThumbEstimate[] }>("/settings/thumbnails/estimate", { method: "POST", ...json(body) }),
 };
+
+/** A thumbnail image as a download (`?download=true` names the file after the video). */
+export function thumbDownloadUrl(thumbId: string, v: "final" | "raw" = "final"): string {
+  return apiUrl(`/thumbnails/${thumbId}/image?v=${v}&download=true`);
+}
 
 /** The package as Markdown, served as a download. */
 export function exportUrl(videoId: string): string {

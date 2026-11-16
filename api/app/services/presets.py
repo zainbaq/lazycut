@@ -61,6 +61,7 @@ class ResearchField(_Strict):
     label: str | None = None
     type: Literal["text", "bool"] = "text"
     needs_credible_source: bool = False
+    hint: str | None = None  # what to look for, shown to the research model
 
 
 class Condition(_Strict):
@@ -104,6 +105,12 @@ class ClipRules(_Strict):
     end_cue: str | None = None
 
 
+class BannedTag(_Strict):
+    """A tag removed automatically unless the condition holds (e.g. `soulslike` unless research says it is one)."""
+    tag: str
+    unless: Condition | None = None
+
+
 class TitlePatterns(_Strict):
     recommended: str
     alternates: list[str] = []
@@ -131,9 +138,17 @@ class Preset(_Strict):
     clip_rules: ClipRules = ClipRules()
     saved_prompts: list[str] = []
     tag_recipe: list[str] = []
-    banned_tags: list[str] = []
+    banned_tags: list[str | BannedTag] = []
     slots: dict[str, str] = {}
     templates: Templates = Templates()
+    # Search demand (7.7.1): extra suggestion seeds ({topic}, {name}), hashtags that replace an
+    # ambiguous name's hashtag, and the playlist to suggest when the topic has none.
+    search_seeds: list[str] = []
+    search_fit: str = ""        # which generic search phrases describe this kind of video, for the writer
+    fallback_hashtags: list[str] = []
+    playlist_name: str = "{topic}"
+    # Credit lines, e.g. "Boss: {real_name} ({epithet})". A line whose first variable is empty is left out.
+    credit_lines: list[str] = []
 
     @model_validator(mode="after")
     def _cross_check(self) -> "Preset":
@@ -166,6 +181,13 @@ class Preset(_Strict):
             check_condition(f"hook `{hook.id}`", hook.when)
         for rule in self.claim_rules:
             check_condition(f"claim rule `{rule.id}`", rule.requires)
+        for ban in self.banned_tags:
+            if isinstance(ban, BannedTag) and ban.unless:
+                check_condition(f"banned tag `{ban.tag}`", ban.unless)
+        for seed in self.search_seeds:
+            for name in _VARIABLE.findall(seed):
+                if name not in ("topic", "name"):
+                    problems.append(f"search seed `{seed}` uses `{{{name}}}`; only {{topic}} and {{name}} are allowed")
 
         # Hooks may only use facts, so a hook can never carry model-written text.
         for hook in self.hooks:
@@ -179,6 +201,8 @@ class Preset(_Strict):
             "title_patterns.recommended": self.title_patterns.recommended,
             **{f"title_patterns.alternates[{i}]": t for i, t in enumerate(self.title_patterns.alternates)},
             **{f"templates.{k}": v for k, v in self.templates.model_dump().items() if v},
+            **{f"credit_lines[{i}]": t for i, t in enumerate(self.credit_lines)},
+            "playlist_name": self.playlist_name,
         }
         for where, text in templates.items():
             for name in _VARIABLE.findall(text):
@@ -191,6 +215,9 @@ class Preset(_Strict):
 
     def event_type_ids(self) -> list[str]:
         return [e.id for e in self.event_types]
+
+    def bans(self) -> list[BannedTag]:
+        return [b if isinstance(b, BannedTag) else BannedTag(tag=b) for b in self.banned_tags]
 
 
 class Playlist(_Strict):
@@ -232,7 +259,7 @@ BUILTIN_GENERAL = Preset(
         EventType(id="peak", label="Peak moment", glyph="diamond", color="gold",
                   definition="The most striking moment of a section."),
     ],
-    title_patterns=TitlePatterns(recommended="{topic} {subject} - {hook}"),
+    title_patterns=TitlePatterns(recommended="{topic} - {subject}: {hook}"),
 )
 
 

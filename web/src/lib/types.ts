@@ -44,7 +44,7 @@ export interface ConfigStatus {
   channel: string | null;
   presets: string[];
   models: { video: string | null; text: string | null };
-  keys: { gemini: boolean; anthropic: boolean; youtube: boolean };
+  keys: { gemini: boolean; anthropic: boolean; youtube: boolean; higgsfield?: boolean };
   event_detectors?: string[];
   storage?: Record<string, unknown>;
   tools?: Record<string, boolean>;
@@ -296,7 +296,7 @@ export interface RuleResult {
   field: string;
   message: string;
   evidence: unknown;
-  /** An auto-fix changed the field (canonical_spelling, hashtag_count, banned_tags). */
+  /** An auto-fix changed the field (canonical_spelling, hashtag_count, banned_tags, tags_fit). */
   fixed: boolean;
   dismissed: boolean;
 }
@@ -330,6 +330,55 @@ export interface PackageFields {
   checklist: { item: string; detail: string }[];
   slots: Record<string, string>;
   goals: Record<string, Goal>;
+  /** Search demand behind the title and tags (BUILD_SPEC 7.7.1). Older packages lack it. */
+  seo?: Seo;
+}
+
+export interface SeoCover {
+  text: string;
+  demand: number;
+  match: "exact" | "words";
+  /** The match ends within the first 60 characters. */
+  front: boolean;
+}
+
+export interface SeoPhrase {
+  id: string;
+  text: string;
+  rank: number;
+  seen: number;
+  /** 1.0 = a top suggestion; suggestion rank, not views. */
+  demand: number;
+  about_subject: boolean;
+  /** The writer judged someone typing it would want this video. */
+  fits: boolean;
+  in_title?: boolean;
+  in_tags?: boolean;
+}
+
+export interface SeoTitleScore {
+  id: string;
+  text: string;
+  /** Includes rule penalties (0 when a rule would block it). */
+  score: number;
+  demand_score?: number;
+  covers: SeoCover[];
+  writer_pick: boolean;
+  issues?: string[];
+}
+
+export interface Seo {
+  /** null: no search data; the writer's choices stand. */
+  source: "youtube_suggest" | null;
+  harvested_at: string | null;
+  picked_by: "search_score" | "search_score_agrees" | "writer";
+  phrases: SeoPhrase[];
+  excluded: { text: string; demand: number; reason: string }[];
+  title_scores: SeoTitleScore[];
+  /** The current title (after edits) against the best candidate. */
+  title_score?: { score: number; covers: SeoCover[]; best_candidate: number };
+  /** Bare names mostly searched for something else; never a tag or hashtag alone. */
+  ambiguous_names: string[];
 }
 
 export interface Package {
@@ -413,3 +462,186 @@ export interface PublishBody {
 
 /** `POST /videos/{id}/publish` returns the video plus the past-upload entry it wrote. */
 export type PublishedVideo = Video & { library_item: LibraryItem };
+
+// ---- thumbnails (BUILD_SPEC 7.13) --------------------------------------------------
+
+export type Aspect = "16:9" | "9:16";
+export type Corner = "top_left" | "top_right" | "bottom_left" | "bottom_right";
+export type CornerChoice = Corner | "auto";
+export type ThumbFont = "bebas" | "montserrat" | "league_spartan" | "dejavu";
+export type TextMode = "app" | "model";
+export type ParamValue = string | number | boolean;
+
+export interface ThumbModel {
+  id: string;
+  label: string;
+  path: string;
+  /** Current values: the YAML defaults with the saved overrides on top. */
+  params: Record<string, ParamValue>;
+  /** Allowed values per option. */
+  options: Record<string, ParamValue[]>;
+}
+
+/** The effective thumbnail settings (`GET /settings/thumbnails` adds `keys`). */
+export interface ThumbSettings {
+  model: string;
+  text_mode: TextMode;
+  review: boolean;
+  text_corner: CornerChoice;
+  font: ThumbFont;
+  aspects: Aspect[];
+  prompt: string;
+  custom_prompt: boolean;
+  default_prompt: string;
+  models: ThumbModel[];
+  keys?: { higgsfield: boolean; anthropic: boolean };
+}
+
+/** `PUT /settings/thumbnails`: every field optional; unset keeps the YAML default. */
+export interface ThumbSettingsInput {
+  model?: string;
+  params?: Record<string, Record<string, ParamValue>>;
+  text_mode?: TextMode;
+  review?: boolean;
+  text_corner?: CornerChoice;
+  font?: ThumbFont;
+  aspects?: Aspect[];
+  prompt?: string | null;
+}
+
+export interface FrameCandidate {
+  t: number;
+  why: string;
+  score: number;
+  code_score: number;
+  text_corner: Corner;
+  claude: null | {
+    score: number;
+    subject_visible: boolean;
+    hud: "none" | "light" | "heavy";
+    text_corner: Corner;
+    reason: string;
+  };
+  sharpness: number;
+  brightness: number;
+}
+
+export interface FrameFinds {
+  created_at: string;
+  ranked_by: "claude" | "code";
+  looked_at: number;
+  frames: FrameCandidate[];
+}
+
+export interface WordChoice {
+  word: string;
+  text_style: string;
+  from: "hook" | "package";
+}
+
+export interface ReviewCheck {
+  id: string;
+  ok: boolean;
+  note: string;
+}
+
+export interface ThumbReview {
+  verdict: "ok" | "check" | null;
+  checks: ReviewCheck[];
+  summary?: string;
+  problems?: number;
+  model?: string;
+  /** Checks done in code: file size and dimensions, and the area behind the word. */
+  code?: ReviewCheck[];
+  /** The word changed after the review. */
+  stale?: boolean;
+}
+
+export interface Thumbnail {
+  id: string;
+  video_id: string;
+  batch_id: string;
+  source_kind: "frame" | "upload";
+  source_t: number | null;
+  aspect: Aspect;
+  model: string;
+  params: Record<string, ParamValue>;
+  prompt: string;
+  custom_prompt: boolean;
+  text_mode: TextMode;
+  word: string;
+  text_style: string;
+  text_corner: Corner;
+  font: ThumbFont;
+  status: "queued" | "running" | "done" | "failed" | "nsfw";
+  request_id: string | null;
+  review: ThumbReview | null;
+  cost_usd: number | null;
+  chosen: boolean;
+  error: string | null;
+  created_at: string;
+  urls: { source: string | null; raw: string | null; final: string | null };
+}
+
+export interface ThumbUpload {
+  id: string;
+  url: string;
+  width?: number;
+  height?: number;
+}
+
+/** `GET /videos/{id}/thumbnails`. */
+export interface ThumbnailState {
+  can_generate: boolean;
+  missing: string[];
+  can_review: boolean;
+  settings: ThumbSettings;
+  words: WordChoice[];
+  default_text_style: string;
+  frames: FrameFinds | null;
+  finding_frames: boolean;
+  running: boolean;
+  uploads: ThumbUpload[];
+  thumbnails: Thumbnail[];
+}
+
+export interface ThumbSource {
+  kind: "frame" | "upload";
+  t?: number;
+  upload_id?: string;
+}
+
+/** `POST /videos/{id}/thumbnails`. Each image is a paid Higgsfield call. */
+export interface ThumbGenerate {
+  source: ThumbSource;
+  models?: string[];
+  aspects?: Aspect[];
+  word?: string;
+  text_style?: string;
+  text_corner?: CornerChoice;
+  text_mode?: TextMode;
+  prompt?: string;
+}
+
+export interface ThumbGenerateResult {
+  batch_id: string;
+  job: Job;
+  thumbnails: Thumbnail[];
+  word_issues: { message: string; severity: string }[];
+}
+
+/** `PATCH /thumbnails/{id}`: choose, or redraw the word for free. */
+export interface ThumbAdjust {
+  chosen?: boolean;
+  word?: string;
+  text_style?: string;
+  text_corner?: Corner;
+  font?: ThumbFont;
+}
+
+export interface ThumbEstimate {
+  model: string;
+  aspect: Aspect;
+  usd: number | null;
+  error?: string;
+}

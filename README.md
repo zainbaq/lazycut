@@ -33,6 +33,18 @@ sources only count as credible when their site is listed under `credible_domains
 `config/channel.yaml`. Writing the YouTube package is one Claude call (about $0.05) and needs the
 preset's required facts confirmed first.
 
+Titles and tags are chosen by measured search demand: after research the app collects YouTube's
+search suggestions for the topic and the subject's names (free, no key; only those names are sent),
+the writer marks which phrases fit the video, and code picks the title that covers the most popular
+fitting phrases. `SEARCH_DEMAND=off` in `.env` turns this off.
+
+Thumbnails are made on the video's Thumbnail page with Higgsfield (set `HIGGSFIELD_API_KEY` to the API key from
+console.higgsfield.ai, exactly as the console shows it; each image is a paid call, priced before you click).
+"Find frames" suggests the best source moments (Claude ranks them, a few cents), or pick any moment or upload
+your own image. LazyCut draws the result word itself, so it is always spelled right and a new word costs
+nothing, then Claude checks faces, hands, leftover HUD and the text. The model, its options and the prompt are
+on the Settings page; `config/thumbnails.yaml` holds the defaults.
+
 ## How events are found
 
 Event detection is a set of detectors feeding one merge step (BUILD_SPEC 7.3.1). `EVENT_DETECTORS`

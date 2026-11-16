@@ -5,7 +5,7 @@ import { useEffect, useRef } from "react";
 
 import { apiUrl } from "./api";
 import { keys, mergeJob } from "./queries";
-import type { Job, PackageList, Research, Timeline, TimelineEvent, Video } from "./types";
+import type { FrameFinds, Job, PackageList, Research, Thumbnail, ThumbnailState, Timeline, TimelineEvent, Video } from "./types";
 
 /** Model events the server replaces on re-analysis (7.12), unless the user chose to discard everything. */
 export function replaceable(e: TimelineEvent): boolean {
@@ -46,6 +46,10 @@ export function useVideoUpdates(videoId: string, ready: boolean) {
       if (job.kind === "package" && (job.status === "queued" || job.status === "running")) {
         qc.setQueryData<PackageList>(keys.packages(videoId), (p) => (p && !p.running ? { ...p, running: true } : p));
       }
+      if ((job.kind === "thumbnail" || job.kind === "thumbnail_frames") && (job.status === "queued" || job.status === "running")) {
+        const flag = job.kind === "thumbnail" ? "running" : "finding_frames";
+        qc.setQueryData<ThumbnailState>(keys.thumbnails(videoId), (s) => (s && !s[flag] ? { ...s, [flag]: true } : s));
+      }
     };
     const onFinished = (e: MessageEvent<string>) => {
       onJob(e);
@@ -59,6 +63,21 @@ export function useVideoUpdates(videoId: string, ready: boolean) {
       if (job.kind === "research" || job.kind === "import") void qc.invalidateQueries({ queryKey: keys.research(videoId) });
       // A new package, or new facts, events or research that make the current one stale.
       void qc.invalidateQueries({ queryKey: keys.packages(videoId) });
+      if (job.kind === "thumbnail" || job.kind === "thumbnail_frames" || job.kind === "package") {
+        void qc.invalidateQueries({ queryKey: keys.thumbnails(videoId) });
+      }
+    };
+    const onThumb = (e: MessageEvent<string>) => {
+      const row = JSON.parse(e.data) as Thumbnail;
+      qc.setQueryData<ThumbnailState>(keys.thumbnails(videoId), (s) => {
+        if (!s) return s;
+        const known = s.thumbnails.some((t) => t.id === row.id);
+        return { ...s, thumbnails: known ? s.thumbnails.map((t) => (t.id === row.id ? row : t)) : [row, ...s.thumbnails] };
+      });
+    };
+    const onFrames = (e: MessageEvent<string>) => {
+      const frames = JSON.parse(e.data) as FrameFinds;
+      qc.setQueryData<ThumbnailState>(keys.thumbnails(videoId), (s) => (s ? { ...s, frames } : s));
     };
     const onEvent = (e: MessageEvent<string>) => {
       const event = JSON.parse(e.data) as TimelineEvent;
@@ -79,6 +98,8 @@ export function useVideoUpdates(videoId: string, ready: boolean) {
     source.addEventListener("job.done", onFinished as EventListener);
     source.addEventListener("job.error", onFinished as EventListener);
     source.addEventListener("analysis.event", onEvent as EventListener);
+    source.addEventListener("thumbnail.updated", onThumb as EventListener);
+    source.addEventListener("thumbnail.frames", onFrames as EventListener);
     source.onerror = () => {
       hadError = true;
     };
@@ -90,6 +111,7 @@ export function useVideoUpdates(videoId: string, ready: boolean) {
         void qc.invalidateQueries({ queryKey: keys.timeline(videoId) });
         void qc.invalidateQueries({ queryKey: keys.research(videoId) });
         void qc.invalidateQueries({ queryKey: keys.packages(videoId) });
+        void qc.invalidateQueries({ queryKey: keys.thumbnails(videoId) });
       }
     };
     return () => source.close();

@@ -64,7 +64,7 @@ def _field_lines(preset: Preset) -> str:
     lines = []
     for f in preset.research_fields:
         kind = "yes or no" if f.type == "bool" else "text"
-        lines.append(f"- {f.key} ({field_label(f)}; {kind})")
+        lines.append(f"- {f.key} ({field_label(f)}; {kind})" + (f": {f.hint}" if f.hint else ""))
     return "\n".join(lines)
 
 

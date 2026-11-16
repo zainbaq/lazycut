@@ -10,12 +10,13 @@ facts: []
 research_fields:
   - {key: canonical_name}
   - {key: summary}
+  - {key: nicknames, label: Nicknames, hint: "other names people use for the subject, comma-separated"}
 credit_fields: []
 hooks: []
 thumbnail_words: []
 title_patterns:
-  recommended: "{topic} {subject} - {hook}"
-  alternates: ["{subject}: {what_happens}"]
+  recommended: "{topic} - {subject}: {hook}"
+  alternates: ["{subject}: {title_angle}"]
 claim_rules: []
 clip_rules: {lead_in_s: 0.5, tail_s: 0.5}
 saved_prompts: ["Best 30 seconds", "Opening", "Ending"]
@@ -26,6 +27,7 @@ slots:
   body_paragraph: "3 to 5 sentences on what happens and what is worth noticing."
   plain_hook: "On-screen text in plain language, one short line."
   what_happens: "One sentence on what happens in the clip."
+  title_angle: "3 to 6 words for a title: what makes this video worth clicking. No first person, no claim, no number."
   question: "A question that invites a reply."
   emoji: "One fitting emoji."
 templates:

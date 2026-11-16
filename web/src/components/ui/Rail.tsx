@@ -4,7 +4,7 @@ import * as Tooltip from "@radix-ui/react-tooltip";
 import { ChartLine, Clapperboard, Image as ImageIcon, LayoutGrid, Scissors, Search, Settings, Upload } from "lucide-react";
 import Link from "next/link";
 
-type Section = "library" | "new" | "workspace" | "research" | "past";
+type Section = "library" | "new" | "workspace" | "research" | "thumbnail" | "past" | "settings";
 
 interface Item {
   id: string;
@@ -62,7 +62,7 @@ export function Rail({ section, videoId }: { section: Section; videoId?: string 
     { id: "new", label: "Import video", icon: Upload, href: "/new" },
     { id: "workspace", label: "Workspace", icon: Scissors, href: videoId ? `/v/${videoId}` : undefined, disabled: videoId ? undefined : "open a video" },
     { id: "research", label: "Research", icon: Search, href: videoId ? `/v/${videoId}/research` : undefined, disabled: videoId ? undefined : "open a video" },
-    { id: "thumbnail", label: "Thumbnail", icon: ImageIcon, disabled: "arrives later" },
+    { id: "thumbnail", label: "Thumbnail", icon: ImageIcon, href: videoId ? `/v/${videoId}/thumbnail` : undefined, disabled: videoId ? undefined : "open a video" },
     { id: "past", label: "Past uploads", icon: Clapperboard, href: "/past-uploads" },
   ];
   return (
@@ -75,7 +75,7 @@ export function Rail({ section, videoId }: { section: Section; videoId?: string 
       ))}
       <div className="mt-auto flex flex-col items-center gap-2">
         <RailButton item={{ id: "perf", label: "Performance", icon: ChartLine, disabled: "Phase 4" }} active={false} />
-        <RailButton item={{ id: "settings", label: "Settings", icon: Settings, disabled: "arrives later" }} active={false} />
+        <RailButton item={{ id: "settings", label: "Settings", icon: Settings, href: "/settings" }} active={section === "settings"} />
       </div>
     </nav>
   );

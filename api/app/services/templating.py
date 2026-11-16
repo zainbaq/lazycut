@@ -6,7 +6,7 @@ from typing import Any
 from app.services.presets import Condition
 
 VARIABLE = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
-_SEPARATORS = r"[-–—:|·]"
+_SEPARATORS = r"[-–—:|·,]"
 
 
 def _num(value: Any) -> float | None:

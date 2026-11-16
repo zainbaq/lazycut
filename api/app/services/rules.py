@@ -13,12 +13,14 @@ from typing import Any
 
 from app.services.presets import ChannelProfile, Preset
 from app.services.research import name_key
+from app.services.search_demand import coverage, tag_key
 from app.services.templating import holds
 
 # YouTube long-form limits (checked 2026-11: title 100 characters, description 5,000,
 # all tags together 500 characters counting separators).
 LENGTH_LIMITS = {"youtube": {"title": 100, "description": 5000, "tags": 500, "pinned_comment": 10000}}
 TAGS_TOLERANCE = 5
+MIN_CHAPTER_S = 10.0  # YouTube: every chapter, the last one included, is at least 10 s
 
 
 @dataclass
@@ -32,6 +34,13 @@ class RuleContext:
     research: dict[str, Any]       # effective research values
     past_subjects: list[dict] = field(default_factory=list)  # [{title, subject, angle}]
     dismissed: set[str] = field(default_factory=set)
+    duration_s: float | None = None  # the video's length, for the last chapter's minimum
+    # Search demand (7.7.1): the fitting phrases with their demand, bare names that mean something
+    # else, hashtags to use instead of those, and the playlist to suggest when the topic has none.
+    phrases: list[dict] | None = None   # None = no search data
+    ambiguous: set[str] = field(default_factory=set)
+    fallback_hashtags: list[str] = field(default_factory=list)
+    missing_playlist: str | None = None
 
 
 def _result(rule_id: str, severity: str, field_name: str, message: str, evidence: Any = None,
@@ -55,6 +64,15 @@ def claim_texts(fields: dict) -> list[tuple[str, str]]:
     for i, word in enumerate((fields.get("thumbnail") or {}).get("word_options") or []):
         out.append((f"thumbnail.word_options[{i}]", word))
     return out
+
+
+def active_bans(preset: Preset, facts: dict, research: dict) -> list[str]:
+    """Banned tags in force: a ban with `unless` lifts when its condition holds."""
+    return [b.tag for b in preset.bans() if not (b.unless and holds(b.unless, facts, research))]
+
+
+def _compact(text: str) -> str:
+    return name_key(text).replace(" ", "")
 
 
 def _tags_length(tags: list[str]) -> int:
@@ -100,6 +118,26 @@ def check(fields: dict, ctx: RuleContext) -> tuple[dict, list[dict]]:
         tag = "#" + re.sub(r"[^\w]", "", str(tag).lstrip("#"))
         if len(tag) > 1 and tag.lower() not in {h.lower() for h in hashtags}:
             hashtags.append(tag)
+    # A hashtag of a bare name that means something else (#SwordFanatic is a manhwa) sends viewers
+    # to the wrong page: swap in the preset's fallback hashtag, or drop it.
+    ambiguous = {n.replace(" ", "") for n in ctx.ambiguous}
+    swapped: list[str] = []
+    kept: list[str] = []
+    for tag in hashtags:
+        if tag[1:].lower() not in ambiguous:
+            kept.append(tag)
+            continue
+        taken = {h.lower() for h in hashtags + kept}
+        spare = next((f if f.startswith("#") else "#" + f for f in ctx.fallback_hashtags
+                      if (f if f.startswith("#") else "#" + f).lower() not in taken), None)
+        swapped.append(f"{tag} → {spare}" if spare else f"{tag} removed")
+        if spare:
+            kept.append(spare)
+    hashtags = kept
+    if swapped:
+        results.append(_result("ambiguous_names", "pass", "hashtags",
+                               f"{'; '.join(swapped)}: the bare name is mostly searched for something else",
+                               swapped, fixed=True))
     fixed = hashtags[:want] != tags_raw
     fields["hashtags"] = hashtags[:want]
     if len(fields["hashtags"]) < want:
@@ -108,24 +146,51 @@ def check(fields: dict, ctx: RuleContext) -> tuple[dict, list[dict]]:
     else:
         results.append(_result("hashtag_count", "pass", "hashtags", f"{want} hashtags", fixed=fixed))
 
-    banned = {b.lower() for b in ctx.preset.banned_tags}
+    banned = [_compact(b) for b in active_bans(ctx.preset, ctx.facts, ctx.research) if _compact(b)]
     tags = []
     removed = []
+    bare = []
     for tag in fields.get("tags") or []:
         tag = str(tag).strip().lstrip("#")
-        if not tag or tag.lower() in {t.lower() for t in tags}:
+        if not tag or tag_key(tag) in {tag_key(t) for t in tags}:
             continue
-        if tag.lower() in banned:
+        if any(b in _compact(tag) for b in banned):  # "Soulslike", "souls-like", "phantom blade zero soulslike"
             removed.append(tag)
             continue
+        if name_key(tag) in ctx.ambiguous:
+            bare.append(tag)
+            continue
         tags.append(tag)
-    fields["tags"] = tags
     results.append(_result("banned_tags", "pass", "tags",
                            f"Removed {', '.join(removed)}" if removed else "No banned tags", removed or None,
                            fixed=bool(removed)))
+    if bare:
+        results.append(_result("ambiguous_names", "pass", "tags",
+                               f"Removed {', '.join(bare)}: on its own it is mostly searched for something else; "
+                               "the tags with the topic name stay", bare, fixed=True))
+    # Tags come most important first, so the ones past YouTube's total limit are dropped from the end.
+    tag_limit = LENGTH_LIMITS.get(ctx.platform, {}).get("tags")
+    dropped = []
+    while tag_limit and len(tags) > 1 and _tags_length(tags) > tag_limit:
+        dropped.insert(0, tags.pop())
+    fields["tags"] = tags
+    if dropped:
+        results.append(_result("tags_fit", "pass", "tags",
+                               f"Dropped {', '.join(dropped)} to fit YouTube's {tag_limit}-character limit",
+                               dropped, fixed=True))
 
     # ---- checks ------------------------------------------------------------------
-    texts = claim_texts(fields)
+    results += claim_and_number_results(claim_texts(fields), ctx)
+    _later_checks(fields, ctx, results)
+    for r in results:
+        r["dismissed"] = r["severity"] == "warn" and r["key"] in ctx.dismissed
+    return fields, results
+
+
+def claim_and_number_results(texts: list[tuple[str, str]], ctx: RuleContext) -> list[dict]:
+    """Claim phrases need their fact; numbers must match a confirmed fact or the topic/subject name.
+    Also used to weigh title candidates before one is picked."""
+    results: list[dict] = []
     for rule in ctx.preset.claim_rules:
         ok = holds(rule.requires, ctx.facts, ctx.research)
         for path, text in texts:
@@ -155,6 +220,11 @@ def check(fields: dict, ctx: RuleContext) -> tuple[dict, list[dict]]:
         if stray:
             results.append(_result("number_needs_fact", "warn", path,
                                    f"{', '.join(stray)} does not match a confirmed fact", stray))
+    return results
+
+
+def _later_checks(fields: dict, ctx: RuleContext, results: list[dict]) -> None:
+    channel = ctx.channel
 
     if ctx.topic and channel and channel.strategy_mode == "search_first":
         title = name_key(fields.get("title") or "")
@@ -175,8 +245,10 @@ def check(fields: dict, ctx: RuleContext) -> tuple[dict, list[dict]]:
             problems.append("the first chapter must start at 0:00")
         if len(chapters) < 3:
             problems.append("YouTube needs at least 3 chapters")
-        if any(b["t"] - a["t"] < 10 for a, b in pairwise(chapters)):
+        if any(b["t"] - a["t"] < MIN_CHAPTER_S for a, b in pairwise(chapters)):
             problems.append("chapters must be at least 10 s apart")
+        if ctx.duration_s and ctx.duration_s - chapters[-1]["t"] < MIN_CHAPTER_S:
+            problems.append("the last chapter must be at least 10 s long")
         results.append(_result("chapters_valid", "block" if problems else "pass", "chapters",
                                "; ".join(problems) or f"{len(chapters)} chapters"))
 
@@ -197,15 +269,53 @@ def check(fields: dict, ctx: RuleContext) -> tuple[dict, list[dict]]:
     else:
         results.append(_result("cannibalization", "pass", "title", "No past upload on this subject"))
 
+    _search_demand(fields, ctx, results)
+
+    if ctx.missing_playlist:
+        results.append(_result("playlist", "warn", "description",
+                               f"No playlist for {ctx.topic} yet, so the description has no playlist link. Create "
+                               f"“{ctx.missing_playlist}” and list it under playlists in config/channel.yaml"))
+
     for name, limit in LENGTH_LIMITS.get(ctx.platform, {}).items():
         value = fields.get(name)
         size = _tags_length(value) if name == "tags" else len(value or "")
         if size > limit:
             results.append(_result("length_limits", "block", name, f"{size} characters; the limit is {limit}"))
+    title_limit = LENGTH_LIMITS.get(ctx.platform, {}).get("title")
+    for i, alt in enumerate(fields.get("title_alternates") or []):
+        size = len(alt.get("text") or "")
+        if title_limit and size > title_limit:
+            results.append(_result("length_limits", "warn", f"title_alternates[{i}]",
+                                   f"{size} characters; too long to use as the title (limit {title_limit})"))
 
-    for r in results:
-        r["dismissed"] = r["severity"] == "warn" and r["key"] in ctx.dismissed
-    return fields, results
+
+TOP_PHRASES = 3
+LEAD_CHARS = 150  # what search results show of a description
+
+
+def _search_demand(fields: dict, ctx: RuleContext, results: list[dict]) -> None:
+    """The title and the description's opening should carry at least one of the most popular
+    search phrases that fit the video. Mostly matters after a manual edit: generation picks the
+    best-scoring title already."""
+    if ctx.phrases is None:
+        results.append(_result("search_demand", "pass", "title", "No search data; the writer's choices stand"))
+        return
+    top = sorted((p for p in ctx.phrases if p.get("fits")), key=lambda p: -p["demand"])[:TOP_PHRASES]
+    if not top:
+        results.append(_result("search_demand", "pass", "title", "No search phrase fits this video"))
+        return
+    names = ", ".join(f"“{p['text']}”" for p in top)
+    for field_name, text in (("title", fields.get("title") or ""),
+                             ("description", (fields.get("description") or "")[:LEAD_CHARS])):
+        covered = [p["text"] for p in top if coverage(text, p["text"])[0]]
+        where, s = ("The title", "es") if field_name == "title" else ("The description's first lines", "")
+        if covered:
+            results.append(_result("search_demand", "pass", field_name,
+                                   f"{where} cover{'s' if s else ''} “{covered[0]}”", covered))
+        else:
+            results.append(_result("search_demand", "warn", field_name,
+                                   f"{where} miss{s} every top search for this video: {names}",
+                                   [p["text"] for p in top]))
 
 
 def blocked_fields(results: list[dict]) -> set[str]:

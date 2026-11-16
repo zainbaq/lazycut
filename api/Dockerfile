@@ -2,6 +2,7 @@ FROM python:3.12-slim
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg curl \
+       fonts-bebas-neue fonts-montserrat fonts-league-spartan fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir uv
 

@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api } from "./api";
 import type {
+  Aspect,
   Fact,
   FactUpdate,
   Job,
@@ -17,6 +18,12 @@ import type {
   Research,
   ResearchEdit,
   ResearchRun,
+  ThumbAdjust,
+  ThumbGenerate,
+  Thumbnail,
+  ThumbnailState,
+  ThumbSettings,
+  ThumbSettingsInput,
   Video,
 } from "./types";
 
@@ -33,6 +40,9 @@ export const keys = {
   packages: (id: string) => ["packages", id] as const,
   allPackages: ["packages"] as const,
   library: ["library"] as const,
+  thumbnails: (id: string) => ["thumbnails", id] as const,
+  thumbSettings: ["thumb-settings"] as const,
+  thumbEstimate: (models: string[], aspects: string[]) => ["thumb-estimate", models.join(","), aspects.join(",")] as const,
 };
 
 export const useConfigStatus = () =>
@@ -348,5 +358,133 @@ export function useDeleteVideo() {
       void qc.invalidateQueries({ queryKey: keys.videos });
       void qc.invalidateQueries({ queryKey: keys.imports });
     },
+  });
+}
+
+// ---- thumbnails (7.13) --------------------------------------------------------------
+
+/** Thumbnails, frame finds, word choices and settings for one video. Polls while work runs, as
+ * a fallback for the live stream. */
+export const useThumbnails = (id: string) =>
+  useQuery({
+    queryKey: keys.thumbnails(id),
+    queryFn: () => api.thumbnails(id),
+    refetchInterval: (q) => {
+      const d = q.state.data;
+      const busy = d && (d.running || d.finding_frames || d.thumbnails.some((t) => t.status === "queued" || t.status === "running"));
+      return busy ? 4000 : false;
+    },
+  });
+
+/** Find frames: free scoring in code, then a small paid Claude call ranks the best few. */
+export function useFindFrames(videoId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.findFrames(videoId),
+    onSuccess: (job) => {
+      qc.setQueryData<Video>(keys.video(videoId), (v) => mergeJob(v, job));
+      qc.setQueryData<ThumbnailState>(keys.thumbnails(videoId), (s) => (s ? { ...s, finding_frames: true } : s));
+    },
+  });
+}
+
+export function useUploadThumbSource(videoId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (file: File) => api.uploadThumbSource(videoId, file),
+    onSuccess: (up) =>
+      qc.setQueryData<ThumbnailState>(keys.thumbnails(videoId), (s) =>
+        s ? { ...s, uploads: [up, ...s.uploads.filter((u) => u.id !== up.id)] } : s,
+      ),
+  });
+}
+
+/** Generate: each image is a paid Higgsfield call. */
+export function useGenerateThumbnails(videoId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: ThumbGenerate) => api.generateThumbnails(videoId, body),
+    onSuccess: (res) => {
+      qc.setQueryData<Video>(keys.video(videoId), (v) => mergeJob(v, res.job));
+      qc.setQueryData<ThumbnailState>(keys.thumbnails(videoId), (s) =>
+        s ? { ...s, running: true, thumbnails: [...res.thumbnails, ...s.thumbnails] } : s,
+      );
+    },
+  });
+}
+
+function putThumb(qc: ReturnType<typeof useQueryClient>, videoId: string, row: Thumbnail) {
+  qc.setQueryData<ThumbnailState>(keys.thumbnails(videoId), (s) => {
+    if (!s) return s;
+    const known = s.thumbnails.some((t) => t.id === row.id);
+    const rows = known ? s.thumbnails.map((t) => (t.id === row.id ? row : t)) : [row, ...s.thumbnails];
+    // Choosing is one per aspect; the server unchose the others.
+    return { ...s, thumbnails: row.chosen ? rows.map((t) => (t.id !== row.id && t.aspect === row.aspect ? { ...t, chosen: false } : t)) : rows };
+  });
+}
+
+/** Choose a thumbnail, or redraw its word, corner or font: free, no model call. */
+export function useAdjustThumbnail(videoId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: ThumbAdjust }) => api.adjustThumbnail(id, body),
+    onSuccess: (row) => putThumb(qc, videoId, row),
+  });
+}
+
+/** Review again: a small paid Claude call. */
+export function useReviewThumbnail(videoId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.reviewThumbnail(id),
+    onSuccess: (job) => {
+      qc.setQueryData<Video>(keys.video(videoId), (v) => mergeJob(v, job));
+      qc.setQueryData<ThumbnailState>(keys.thumbnails(videoId), (s) => (s ? { ...s, running: true } : s));
+    },
+  });
+}
+
+export function useDeleteThumbnail(videoId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteThumbnail(id),
+    onSuccess: (_, id) =>
+      qc.setQueryData<ThumbnailState>(keys.thumbnails(videoId), (s) =>
+        s ? { ...s, thumbnails: s.thumbnails.filter((t) => t.id !== id) } : s,
+      ),
+  });
+}
+
+/** Higgsfield's price quote for this set of models and aspects (free). Off without a key. */
+export const useThumbEstimate = (models: string[], aspects: Aspect[], enabled: boolean) =>
+  useQuery({
+    queryKey: keys.thumbEstimate(models, aspects),
+    queryFn: () => api.estimateThumbnails({ models, aspects }),
+    enabled: enabled && models.length > 0 && aspects.length > 0,
+    staleTime: 10 * 60_000,
+    retry: false,
+  });
+
+export const useThumbSettings = () => useQuery({ queryKey: keys.thumbSettings, queryFn: api.thumbSettings });
+
+function afterThumbSettings(qc: ReturnType<typeof useQueryClient>, s: ThumbSettings) {
+  qc.setQueryData(keys.thumbSettings, s);
+  void qc.invalidateQueries({ queryKey: ["thumbnails"] });
+  void qc.invalidateQueries({ queryKey: ["thumb-estimate"] });
+}
+
+export function useSaveThumbSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: ThumbSettingsInput) => api.saveThumbSettings(body),
+    onSuccess: (s) => afterThumbSettings(qc, s),
+  });
+}
+
+export function useResetThumbSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.resetThumbSettings(),
+    onSuccess: (s) => afterThumbSettings(qc, s),
   });
 }

@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     anthropic_model: str = ""
     youtube_api_key: str = ""
+    higgsfield_api_key: str = ""     # thumbnail generation (7.13): the console's API key, "id:secret" in one value
+    higgsfield_key_id: str = ""      # or the two halves separately
+    higgsfield_key_secret: str = ""
+    higgsfield_base_url: str = "https://api.higgsfield.ai"
 
     data_dir: Path = Path("/data")
     db_path: Path = Path("/db/app.db")
@@ -30,12 +34,24 @@ class Settings(BaseSettings):
     analysis_media_resolution: Literal["low", "medium", "high"] | None = None
     event_detectors: str = "gemini"  # comma-separated detector ids, in merge priority order
     event_snap: Literal["off", "visual"] = "off"
+    search_demand: Literal["youtube_suggest", "off"] = "youtube_suggest"  # free search-suggestion harvest (7.7.1)
     dead_time_threshold: float = 0.08
     export_vertical_size: str = "1080x1920"
 
     @property
     def detector_ids(self) -> list[str]:
         return [d.strip() for d in self.event_detectors.split(",") if d.strip()]
+
+    @property
+    def higgsfield_credential(self) -> str:
+        """"id:secret" for the `Authorization: Key` header, from whichever variables are set; "" when none."""
+        if self.higgsfield_api_key:
+            return self.higgsfield_api_key
+        if self.higgsfield_key_id and self.higgsfield_key_secret:
+            return f"{self.higgsfield_key_id}:{self.higgsfield_key_secret}"
+        if ":" in self.higgsfield_key_secret:  # the combined key put in the secret's place
+            return self.higgsfield_key_secret
+        return ""
 
     @property
     def media_dir(self) -> Path:

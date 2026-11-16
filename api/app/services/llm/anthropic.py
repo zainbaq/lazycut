@@ -5,6 +5,7 @@ grounded answer needs two calls (BUILD_SPEC 7.7, 7.10): `search` returns finding
 with the pages it read, and `generate_json` turns text into a validated model.
 """
 
+import base64
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -121,8 +122,24 @@ class ClaudeProvider:
             usage=usage, latency_s=round(time.monotonic() - started, 2),
         )
 
+    async def look_json[T: BaseModel](
+        self, prompt: str, images: list[tuple[str, bytes, str]], schema: type[T], effort: str = "low"
+    ) -> LLMResult[T]:
+        """Structured answer about still images: each (label, bytes, media type) goes in before the prompt.
+
+        Claude reads stills (frames, thumbnails); only Gemini watches video (D24)."""
+        content: list[dict] = []
+        for label, data, media_type in images:
+            if label:
+                content.append({"type": "text", "text": label})
+            content.append({"type": "image", "source": {
+                "type": "base64", "media_type": media_type, "data": base64.b64encode(data).decode("ascii"),
+            }})
+        content.append({"type": "text", "text": prompt})
+        return await self.generate_json(content, schema, effort=effort)  # type: ignore[arg-type]
+
     async def generate_json[T: BaseModel](
-        self, prompt: str, schema: type[T], search: bool = False, effort: str = "low"
+        self, prompt: str | list[dict], schema: type[T], search: bool = False, effort: str = "low"
     ) -> LLMResult[T]:
         if search:
             raise LLMError("Use search() first and pass its findings in the prompt")

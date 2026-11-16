@@ -9,6 +9,7 @@ import type { Goal, Package } from "@/lib/types";
 
 import { ClaimText, GoalChip, SweepCopy } from "./bits";
 import { claimMarks, isBlocked } from "./rules";
+import { TitleIssues, TitleScore } from "./SearchDemand";
 
 interface Card {
   path: string;
@@ -77,9 +78,14 @@ export function TitleDeck({
           </p>
           <div className="flex flex-wrap items-center gap-1.5">
             <GoalChip goal={card.goal} />
+            <TitleScore pkg={pkg} text={card.text} />
+            {card.recommended && pkg.fields.seo?.picked_by === "search_score" && !edited ? (
+              <span className="text-[10.5px] text-fg3">Chosen by search score</span>
+            ) : null}
             <span className="tnum text-[10.5px] text-fg4">{card.text.length} / 100</span>
           </div>
           {card.why ? <p className="text-[11.5px] text-fg3">{card.why}</p> : null}
+          <TitleIssues pkg={pkg} text={card.text} />
         </motion.div>
       </AnimatePresence>
       <div className="flex flex-wrap items-center gap-1.5 whitespace-nowrap">

@@ -34,19 +34,28 @@ research_fields:
   - {key: studio}
   - {key: platforms}
   - {key: protagonist}
+  - {key: nicknames,     label: Nicknames,      hint: "names players and guides use for the boss besides the official one, comma-separated"}
+  - {key: genre,                                hint: "the game's genre as its makers and major reviewers describe it"}
+  - {key: is_soulslike,  label: Is a soulslike, type: bool, needs_credible_source: true, hint: "yes only if the makers or major reviewers call the game a soulslike"}
+  - {key: related_games, label: Related games,  hint: "one or two games it is a sequel to or most often compared with, comma-separated"}
 credit_fields: [real_name, epithet, questline, platforms, studio]
+credit_lines:                  # the description's credit block; a line whose first variable is empty is left out
+  - "Boss: {real_name} ({epithet})"
+  - "Game: {topic} ({platforms}, {studio})"
 
 hooks:
   - {id: no_hit,   text: "No Hit",                       thumbnail_word: "NO HIT",            thumbnail_text_style: "gold, heavy black outline", when: {fact: hits_taken, op: eq, value: 0}}
   - {id: one_hit,  text: "Only 1 Hit Taken",             thumbnail_word: "1 HIT TAKEN",       when: {fact: hits_taken, op: eq, value: 1}}
   - {id: few_hits, text: "Only {hits_taken} Hits Taken", thumbnail_word: "{hits_taken} HITS", when: {fact: hits_taken, op: between, value: [2, 3]}}
   - {id: counters, text: "{counter_count} Counters",     when: {fact: counter_count, op: gte, value: 3}}
+  - {id: final_boss, text: "Final Boss", thumbnail_word: "FINAL BOSS", when: {research: is_final_boss, op: eq, value: true}}
 thumbnail_words: ["2 V 1"]    # extra words with no claim attached
 
 title_patterns:
   recommended: "{topic} - {subject} Boss Fight ({hook})"
   alternates:
-    - "{topic} - How to Beat {subject} Made Easy"
+    - "{topic} {subject} Boss Fight | {search_tail}"      # search-max
+    - "{topic} - How to Beat {subject} | Boss Made Easy"  # on-brand
     - "{topic} - {subject} ({hook})"
 
 claim_rules:
@@ -65,11 +74,20 @@ clip_rules:
   end_cue: "on the result flash, before any dissolve"
 
 saved_prompts: ["Longest counter chain", "Finisher", "Phase change"]
-tag_recipe: [topic_variants, subject_names, difficulty_terms, questline_area, mechanics, protagonist, studio, channel]
-banned_tags: [soulslike]      # removed automatically; delete the entry if the tag is accurate
+tag_recipe: [topic_variants, subject_names, difficulty_terms, questline_area, mechanics, protagonist, platforms, studio, related_games, channel]
+banned_tags:                  # removed automatically unless research says the label is accurate
+  - {tag: soulslike, unless: {research: is_soulslike, op: eq, value: true}}
+search_seeds: ["{topic} boss", "{topic} bosses", "{topic} {name} boss fight", "how to beat {name}"]
+search_fit: >-
+  This video is one boss fight from start to kill. "boss fight", "bosses", "boss battle", "boss gameplay",
+  "how to beat" and "boss guide" fit; "walkthrough", "part 1", "full game", "gameplay" of the whole game,
+  "combat" showcases and "all bosses" lists do not.
+fallback_hashtags: ["#BossFight", "#Gameplay"]   # replace a subject hashtag whose bare name means something else
+playlist_name: "{topic} — All Boss Fights"
 
 slots:                        # text the writer model fills
   hook_line: "1 to 2 sentences that open the description and restate the title's promise in plain words."
+  search_tail: "2 to 4 words players search with this boss: the questline, area or a nickname. Prefer words from a fitting search phrase. No claim, no number, and not Boss or Fight (the title has them)."
   body_paragraph: "3 to 5 sentences on the tactics that worked, in first person."
   tip: "One specific tip that pays off during the clip, 2 sentences."
   plain_hook: "On-screen text in plain language with a number, no niche jargon."
