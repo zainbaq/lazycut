@@ -52,16 +52,18 @@ models:
 prompt: |-
   Turn this gameplay frame from {topic} into a striking YouTube thumbnail, {aspect}.
   Keep {subject} and the player character exactly as they appear in the frame: same design, armour, weapons, colours and pose. Keep the setting recognisable.
-  Remove every piece of game HUD: health and stamina bars, boss name bars, button prompts, subtitles, damage numbers, minimap and item slots.
+  Remove every piece of game HUD: health and stamina bars, boss name bars, button prompts, subtitles, damage numbers, minimap, item slots, and lock-on, target or waypoint markers.
   Make it cinematic: dramatic lighting, strong contrast, crisp detail, and a subtle rim light that separates the characters from the background. Push the colour slightly; no blur.
   {framing}
   {text_instruction}
   Faces and hands must be anatomically correct, with no extra limbs or weapons. No watermark, logo or border.
 
 text_instruction:
-  app: "Do not add any text, letters, numbers or logos. Keep the {text_corner} area free of important detail so a word can be placed there."
+  app: "Do not add any text, letters, numbers or logos. Keep the {text_corner} free of important detail so a word can be placed there."
   model: 'Add the words "{word}" in huge bold letters, {text_style}, in the {text_corner}. Spell it exactly "{word}" and add no other text.'
 
 framing:
   "16:9": "Frame it wide, with the main clash in the middle third."
-  "9:16": "Frame it tall for a phone. Keep the main subject in the centre, and keep the top 12% and bottom 15% free of important detail."
+  # {text_corner} is a band in 9:16 ("top 40% of the picture"): the word is drawn centred across it, below the top 12%.
+  # It asks for more room than the word needs because models leave less open space than they are asked for.
+  "9:16": "Frame it tall for a phone, as a wider shot from further back, so the characters are smaller. Fill the whole {text_corner} with open background only (sky, mist, ground or scenery): no part of a character, weapon or building reaches into it. Keep the top 12% and bottom 15% free of important detail."

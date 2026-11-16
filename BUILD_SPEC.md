@@ -922,6 +922,9 @@ The owner's flow before the app: upload a gameplay frame to Higgsfield, generate
 - The page saves overrides in the `app_setting` table: model, per-model options (checked against the YAML's `options`), text mode, review on or off, corner, font, default aspects, and a custom prompt template. Delete resets to the YAML.
 - A custom prompt can also be given for one run.
 - Template variables: `{topic} {subject} {word} {text_style} {text_corner} {aspect} {avoid}`. Unknown braces are left as typed.
+- In 9:16 the word is drawn centred across a band, so `{text_corner}` reads "top 40% of the picture" or "bottom 40% of the picture", and the framing line asks for a wider shot with only open background in that band. It asks for more room than the word needs because models leave less than they are asked for: asked for a third, Grok Image 2.0 left 17%; asked for 40%, it left 30% (tested live on 2026-11-16).
+- 9:16 placement is measured, not assumed. After the image is painted, code measures how far the open background runs from the safe line, in the columns the word will cover (a row is busy when detail fills more than a third of them). The word keeps its full size when it fits, shrinks to fit when the subject is close (never below 65% of full size) and sits slightly lower when there is room to spare. This costs nothing and also applies to a free redraw. Limit: a dark character on dark ground reads as open space, so the bottom band is less reliable than the top.
+- Known gap: a small blue lock-on marker in the Gate Keeper frame survived all four Grok attempts, even with markers named in the prompt. Claude's review flags it each time. Other models were not tried on it.
 
 **Cost.** Each image is a paid Higgsfield call. The page shows the estimate before Generate, and each thumbnail stores the quoted price. Calls are logged in `llm_call` with `provider = higgsfield`. Claude's frame ranking and each review are small vision calls.
 

@@ -168,7 +168,10 @@ def fill(template: str, values: dict[str, str]) -> str:
     return _VAR.sub(lambda m: values.get(m.group(1), m.group(0)), template)
 
 
-def corner_words(corner: str) -> str:
+def corner_words(corner: str, aspect: str = "16:9") -> str:
+    """Where the word goes, in the prompt's words. In 9:16 it is drawn centred across a band, not in a corner."""
+    if aspect == "9:16":
+        return ("top" if corner.startswith("top") else "bottom") + " 40% of the picture"
     return corner.replace("_", " ") + " corner"
 
 
@@ -177,11 +180,11 @@ def build_prompt(eff: Effective, *, template: str | None, topic: str, subject: s
     mode = text_mode or eff.text_mode
     values = {
         "topic": topic or "the game", "subject": subject or "the main character", "word": word,
-        "text_style": text_style or "white with a heavy black outline", "text_corner": corner_words(corner),
+        "text_style": text_style or "white with a heavy black outline", "text_corner": corner_words(corner, aspect),
         "aspect": "16:9 landscape" if aspect == "16:9" else "9:16 portrait", "avoid": avoid,
     }
     values["text_instruction"] = fill(eff.cfg.text_instruction[mode], values)  # type: ignore[index]
-    values["framing"] = eff.cfg.framing.get(aspect, "")
+    values["framing"] = fill(eff.cfg.framing.get(aspect, ""), values)
     text = fill(template or eff.prompt, values)
     return "\n".join(line for line in text.splitlines() if line.strip()).strip()
 
@@ -398,6 +401,31 @@ def _lines(word: str) -> list[list[str]]:
     return options
 
 
+MIN_WORD_SCALE = 0.65  # a 9:16 word shrinks to fit the open space, but never below this share of its full size
+
+
+def clear_run(img: Image.Image, top: bool, start: float, width: float = 0.6) -> float:
+    """How far the open background runs from the safe line towards the middle, as a share of the height.
+
+    Only the columns the word will cover count (`width`, centred). A row is busy when detail fills more than a
+    third of them, so a branch poking in from one side does not end the run but a character under the word does.
+    Sky, mist and soft ground are calm. A dark character on dark ground can be missed.
+    """
+    w, h = 108, round(108 * img.height / img.width)
+    edges = img.convert("L").resize((w, h), Image.Resampling.BOX).filter(ImageFilter.FIND_EDGES)
+    x0, x1 = round(w * (0.5 - width / 2)), round(w * (0.5 + width / 2))
+    detail = edges.crop((x0, 0, x1, h)).point(lambda v: 255 if v > 28 else 0)
+    rows = [ImageStat.Stat(detail.crop((0, y, x1 - x0, y + 1))).mean[0] / 255 for y in range(h)]
+    rows = [sum(rows[max(0, y - 2):y + 3]) / len(rows[max(0, y - 2):y + 3]) for y in range(h)]  # smooth
+    order = range(round(h * start), h // 2) if top else range(h - 1 - round(h * start), h // 2, -1)
+    run = 0
+    for y in order:
+        if rows[y] > 1 / 3:
+            break
+        run += 1
+    return run / h
+
+
 def draw_word(img: Image.Image, word: str, style: TextStyle, corner: str, aspect: str, font_name: str,
               safe: dict | None = None) -> Image.Image:
     """Draw the word huge, with a heavy outline and a soft shadow, in the corner; 9:16 keeps inside the safe margins."""
@@ -432,17 +460,31 @@ def draw_word(img: Image.Image, word: str, style: TextStyle, corner: str, aspect
         if best is None or lo > best[0]:
             best = (lo, lines)
     size, lines = best  # type: ignore[misc]
-    font = load(size)
-    stroke = max(3, round(size * 0.075))
     draw = ImageDraw.Draw(out)
-    boxes = [draw.textbbox((0, 0), ln, font=font, stroke_width=stroke) for ln in lines]
-    line_h = max(b[3] - b[1] for b in boxes)
-    gap = round(size * 0.04)
-    block_h = line_h * len(lines) + gap * (len(lines) - 1)
-    right = corner.endswith("right")
-    y0 = top_safe if corner.startswith("top") else H - bottom_safe - block_h
+
+    def measure(size: int) -> tuple[Any, int, list, int, int, int]:
+        font = load(size)
+        stroke = max(3, round(size * 0.075))
+        boxes = [draw.textbbox((0, 0), ln, font=font, stroke_width=stroke) for ln in lines]
+        line_h = max(b[3] - b[1] for b in boxes)
+        gap = round(size * 0.04)
+        return font, stroke, boxes, line_h, gap, line_h * len(lines) + gap * (len(lines) - 1)
+
+    font, stroke, boxes, line_h, gap, block_h = measure(size)
+    top = corner.startswith("top")
+    right: bool | None = corner.endswith("right")
+    nudge = 0.0
     if aspect == "9:16":
         right = None  # centred horizontally on a phone cover
+        # The model decides how much open space it leaves, so measure it on the painted picture and fit the word
+        # to it: smaller when the subject comes close (never under MIN_WORD_SCALE), a little lower when there is room.
+        span = min(0.9, max(b[2] - b[0] for b in boxes) / W + 0.04)
+        room = clear_run(out, top, (top_safe if top else bottom_safe) / H, span) * H - H * 0.012
+        if block_h > room:
+            size = max(8, int(size * max(room / block_h, MIN_WORD_SCALE)))
+            font, stroke, boxes, line_h, gap, block_h = measure(size)
+        nudge = min(max(room - block_h, 0) / 2, H * 0.02)
+    y0 = top_safe + nudge if top else H - bottom_safe - block_h - nudge
 
     layer = Image.new("RGBA", out.size, (0, 0, 0, 0))
     shadow = Image.new("RGBA", out.size, (0, 0, 0, 0))
@@ -485,6 +527,11 @@ def render_final(raw: Image.Image, *, aspect: str, word: str, text_style: str, c
 def text_contrast(img: Image.Image, corner: str) -> float:
     """How much the corner behind the word varies (0-255 std). A calm corner keeps the word readable."""
     W, H = img.size
+    if H > W:  # 9:16: the word is centred across a band inside the safe margins
+        cw, ch = round(W * 0.86), round(H * 0.2)
+        x = (W - cw) // 2
+        y = round(H * 0.12) if corner.startswith("top") else H - round(H * 0.15) - ch
+        return ImageStat.Stat(img.convert("L").crop((x, y, x + cw, y + ch))).stddev[0]
     cw, ch = round(W * 0.45), round(H * 0.36)
     x = W - cw if corner.endswith("right") else 0
     y = 0 if corner.startswith("top") else H - ch
@@ -544,7 +591,8 @@ REVIEW_IDS = ("faces", "hands", "hud", "text", "likeness", "artifacts", "placeme
 
 def review_prompt(*, word: str, text_mode: str, subject: str, avoid: str, aspect: str) -> str:
     text_rule = (
-        f'The caption "{word}" must be spelled exactly, easy to read at phone size, and be the only text.'
+        f'The caption "{word}" must be spelled exactly, easy to read at phone size, and be the only text. '
+        "Narrow or missing gaps between its words are fine; judge the letters and digits only."
         if word else "There should be no text at all."
     )
     return (
@@ -553,7 +601,7 @@ def review_prompt(*, word: str, text_mode: str, subject: str, avoid: str, aspect
         "Check image 2 strictly, the way a creator would before uploading:\n"
         "- faces: faces are intact and not melted, doubled or distorted\n"
         "- hands: hands and fingers look right, weapons are held plausibly, no extra limbs\n"
-        "- hud: no game HUD is left (health or boss bars, button prompts, subtitles, damage numbers, minimap)\n"
+        "- hud: no game HUD is left (health or boss bars, button prompts, subtitles, damage numbers, minimap, lock-on or waypoint markers)\n"
         f"- text: {text_rule}\n"
         f"- likeness: {subject or 'the subject'} and the player character still match image 1 (design, colours, gear)\n"
         "- artifacts: no smears, seams, duplicated objects, watermarks or logos\n"

@@ -84,6 +84,11 @@ def test_prompts_fill_variables_and_follow_the_text_mode():
     model = tn.build_prompt(eff, template=None, topic="PB0", subject="Zhuo Bi", word="2 HITS",
                             text_style="gold, black outline", corner="top_right", aspect="9:16", text_mode="model")
     assert '"2 HITS"' in model and "gold, black outline" in model and "top 12%" in model
+    # 9:16 draws the word across a band, so the prompt clears the band, not a corner
+    assert "Fill the whole top 40% of the picture" in model and "corner" not in model
+    tall = tn.build_prompt(eff, template=None, topic="PB0", subject="Zhuo Bi", word="2 HITS", text_style="white",
+                           corner="bottom_left", aspect="9:16")
+    assert "Keep the bottom 40% of the picture free" in tall and "{" not in tall
     own = tn.build_prompt(eff, template="My style for {subject}, keep {json: braces}", topic="", subject="Zhuo Bi",
                           word="", text_style="", corner="top_right", aspect="16:9")
     assert own == "My style for Zhuo Bi, keep {json: braces}"
@@ -150,6 +155,32 @@ def test_the_word_lands_in_its_corner_and_the_file_fits_youtube():
     model_drawn = Image.open(io.BytesIO(tn.render_final(base, aspect="16:9", word="2 HITS", text_style="gold",
                                                         corner="top_right", font="bebas", text_mode="model")))
     assert model_drawn.convert("L").getextrema()[1] < 60  # the app draws nothing when the model wrote the text
+
+
+def test_a_tall_word_shrinks_to_the_open_space_above_the_subject():
+    def subject_from(share: float) -> Image.Image:
+        """Flat sky down to `share` of the height, then a busy 'subject'."""
+        img = Image.new("RGB", (1080, 1920), (120, 140, 170))
+        d = ImageDraw.Draw(img)
+        for y in range(int(1920 * share), 1920, 12):
+            for x in range(0, 1080, 24):
+                d.rectangle((x + (y // 12 % 2) * 12, y, x + (y // 12 % 2) * 12 + 11, y + 5), fill=(20, 20, 20))
+        return img
+
+    def word_rows(img: Image.Image) -> tuple[int, int]:
+        white = [y for y in range(0, 1920, 2) if img.crop((300, y, 780, y + 1)).convert("L").getextrema()[1] > 250]
+        return white[0], white[-1]
+
+    def drawn(share: float) -> tuple[int, int]:
+        return word_rows(tn.draw_word(subject_from(share), "2 V 1", tn.parse_style("white, heavy black outline"),
+                                      "top_right", "9:16", "bebas", {"top_pct": 12, "bottom_pct": 15}))
+
+    assert tn.clear_run(subject_from(0.5), True, 0.12) > 0.3 and tn.clear_run(subject_from(0.05), True, 0.12) == 0
+    roomy, tight, none = drawn(0.5), drawn(0.22), drawn(0.05)
+    full, small = roomy[1] - roomy[0], tight[1] - tight[0]
+    assert tight[1] < 1920 * 0.22 and small < full  # it shrank to stay above the subject
+    assert tight[0] >= 1920 * 0.12 and roomy[0] >= 1920 * 0.12  # and never enters the safe margin
+    assert (none[1] - none[0]) >= full * (tn.MIN_WORD_SCALE - 0.08)  # with no room it stops at the floor size
 
 
 # ---- Higgsfield client --------------------------------------------------------------
