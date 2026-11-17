@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Check, KeyRound, Loader2, RotateCcw, Save } from "lucide-react";
+import { Check, ChevronRight, KeyRound, Loader2, RotateCcw, Save, SlidersHorizontal } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useId, useMemo, useState } from "react";
 
@@ -302,6 +302,17 @@ export function SettingsPage() {
             <h1 className="font-head text-[22px] leading-tight">Advanced settings</h1>
             <span className="text-fg3">Saved in the app on top of config/thumbnails.yaml. Changes apply to the next Generate.</span>
           </div>
+          <Link
+            href="/settings/presets"
+            className="ink-btn flex min-h-14 items-center gap-3 rounded-[12px] border border-line2 bg-surface px-4 py-3"
+          >
+            <SlidersHorizontal aria-hidden="true" size={16} className="shrink-0 text-accentsoft" />
+            <span className="flex min-w-0 flex-col">
+              <span className="text-[14px] font-semibold text-fg">Presets</span>
+              <span className="text-[12px] text-fg3">Event types, facts, hooks, claim rules, clip rules and templates, saved to config/presets</span>
+            </span>
+            <ChevronRight aria-hidden="true" size={16} className="ml-auto shrink-0 text-fg3" />
+          </Link>
           <section aria-labelledby="thumb-settings-heading" className="flex flex-col gap-3">
             <h2 id="thumb-settings-heading" className="font-head text-[16px]">
               Thumbnails

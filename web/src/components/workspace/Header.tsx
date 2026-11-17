@@ -57,7 +57,10 @@ function PresetDetails({ preset }: { preset: Preset }) {
           <code className="break-words text-fg2">{preset.title_patterns.recommended}</code>
         </div>
       ) : null}
-      <span className="text-[11px] text-fg4">The preset editor arrives in Phase 3. Presets live in config/presets.</span>
+      <Link href={`/settings/presets/${preset.id}`} className="ink-btn flex min-h-11 items-center gap-1.5 self-start rounded-[10px] border border-line3 px-3 text-[12px] text-fg">
+        <SlidersHorizontal aria-hidden="true" size={14} />
+        Edit this preset
+      </Link>
     </div>
   );
 }

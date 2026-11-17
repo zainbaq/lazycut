@@ -6,12 +6,15 @@ import type {
   ClipFind,
   ClipList,
   ClipPatch,
+  ChannelSync,
+  CompetitorsView,
   ConfigStatus,
   EventPatch,
   Fact,
   FactUpdate,
   Frames,
   ImportList,
+  ImportStatus,
   Job,
   LibraryItem,
   LibraryItemInput,
@@ -22,7 +25,10 @@ import type {
   PackageEdit,
   PackageList,
   PackageRegenerate,
+  NewPreset,
   Preset,
+  PresetCheck,
+  PresetDoc,
   PublishBody,
   PublishedVideo,
   Research,
@@ -96,6 +102,14 @@ const json = (body: unknown): RequestInit => ({ body: JSON.stringify(body) });
 export const api = {
   configStatus: () => request<ConfigStatus>("/config/status"),
   presets: () => request<Preset[]>("/presets"),
+  presetDoc: (id: string) => request<PresetDoc>(`/presets/${id}`),
+  presetYaml: (id: string) => request<{ id: string; text: string }>(`/presets/${id}/yaml`),
+  checkPreset: (id: string, body: { preset?: PresetDoc; yaml?: string }) =>
+    request<PresetCheck>(`/presets/${id}/check`, { method: "POST", ...json(body) }),
+  savePreset: (id: string, body: PresetDoc) => request<PresetDoc>(`/presets/${id}`, { method: "PUT", ...json(body) }),
+  savePresetYaml: (id: string, text: string) => request<PresetDoc>(`/presets/${id}/yaml`, { method: "PUT", ...json({ text }) }),
+  createPreset: (body: NewPreset) => request<PresetDoc>("/presets", { method: "POST", ...json(body) }),
+  deletePreset: (id: string) => request<{ deleted: string; videos_switched: number }>(`/presets/${id}`, { method: "DELETE" }),
   imports: () => request<ImportList>("/imports"),
   videos: () => request<Video[]>("/videos"),
   video: (id: string) => request<Video>(`/videos/${id}`),
@@ -120,6 +134,9 @@ export const api = {
     request<Job>(`/videos/${id}/research`, { method: "POST", ...json(body) }),
   editResearchField: (id: string, body: ResearchEdit) =>
     request<Research>(`/videos/${id}/research`, { method: "PATCH", ...json(body) }),
+  competitors: (id: string) => request<CompetitorsView>(`/videos/${id}/competitors`),
+  runCompetitors: (id: string, readAgain = false) =>
+    request<Job>(`/videos/${id}/competitors`, { method: "POST", ...json({ read_again: readAgain }) }),
   revertSpelling: (id: string) => request<Research>(`/videos/${id}/research/revert-spelling`, { method: "POST" }),
   packages: (id: string) => request<PackageList>(`/videos/${id}/packages`),
   /** A paid Claude call. */
@@ -137,6 +154,10 @@ export const api = {
   editLibraryItem: (id: string, body: LibraryItemInput) =>
     request<LibraryItem>(`/library/${id}`, { method: "PATCH", ...json(body) }),
   deleteLibraryItem: (id: string) => request<void>(`/library/${id}`, { method: "DELETE" }),
+  importStatus: () => request<ImportStatus>("/library/import"),
+  startImport: () => request<Job>("/library/import", { method: "POST" }),
+  addPlaylists: (ids: string[]) =>
+    request<{ added: { topic: string; name: string; url: string }[]; last: ChannelSync }>("/library/playlists", { method: "POST", ...json({ ids }) }),
   publish: (id: string, body: PublishBody) =>
     request<PublishedVideo>(`/videos/${id}/publish`, { method: "POST", ...json(body) }),
   unpublish: (id: string) => request<Video>(`/videos/${id}/publish`, { method: "DELETE" }),

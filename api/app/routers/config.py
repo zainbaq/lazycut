@@ -57,18 +57,3 @@ def channel() -> dict:
     if profile is None:
         raise HTTPException(404, errors[0].problem if errors else "channel.yaml not found")
     return profile.model_dump()
-
-
-@router.get("/presets")
-def presets() -> list[dict]:
-    found, _errors = load_presets(get_settings().config_dir)
-    order = sorted(found, key=lambda pid: (pid != "general", found[pid].name.lower()))
-    return [found[pid].model_dump() for pid in order]
-
-
-@router.get("/presets/{preset_id}")
-def preset(preset_id: str) -> dict:
-    found, _errors = load_presets(get_settings().config_dir)
-    if preset_id not in found:
-        raise HTTPException(404, f"No preset `{preset_id}`")
-    return found[preset_id].model_dump()

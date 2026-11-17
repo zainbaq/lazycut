@@ -7,7 +7,8 @@ See [BUILD_SPEC.md](BUILD_SPEC.md) for the full design.
 review mode, facts confirmation, subject research, the YouTube long-form package (rule-checked,
 exportable as Markdown), past uploads and "Mark as published" work. So do clips: finding them from
 a prompt, trimming, exporting with ffmpeg, and the Shorts, Reels and TikTok packages (BUILD_SPEC
-section 10). Phase 3 (competitor research, imports, the preset editor) comes next.
+section 10). Phase 3 is in progress: the preset editor, past uploads imported from the channel and competitor
+research are built; Google Drive import comes next.
 
 ## Setup
 
@@ -79,6 +80,36 @@ docker compose exec api python -m scripts.clip_finder_probe --dry
 ```bash
 docker compose exec api python -m scripts.refine_probe --truth pb0-the-gate-keeper --type counter --limit 5
 ```
+
+## Competitors
+
+On a video's Research page, "Find competitors" searches YouTube with the preset's `competitor_query` (one
+search per subject a day: 100 of the free 10,000 daily quota units) and shows the first 25 videos with their
+views, age and channel size. Code works out how spread the views are, the share small channels won, and which
+videos beat their channel's average (a breakout). With `ANTHROPIC_API_KEY`, one Claude call (about 5 cents)
+reads the titles and thumbnails: shared title patterns, thumbnail words, and the angles nobody has taken that
+your confirmed facts can back.
+
+## Past uploads
+
+The Past uploads page feeds two things: the package's end-screen target and the repeat-video warning. "Import from
+YouTube" reads your channel (the `handle` in `config/channel.yaml`) with `YOUTUBE_API_KEY`: uploads, views and
+playlists. It uses free daily quota (about 20 of 10,000 units for 120 uploads), no money. Shorts are told apart and
+kept for the record, but count for neither. Topic, subject and angle are read from each title with no paid call;
+fix any in the table, and later imports keep your edits. The page also lists channel playlists that
+`channel.yaml` lacks and can add them. You can still add past uploads by hand.
+
+To get a key: in Google Cloud Console, enable "YouTube Data API v3" and create an API key; put it in `.env` as
+`YOUTUBE_API_KEY`.
+
+## Presets
+
+Settings → Presets (`/settings/presets`) edits the files in `config/presets/`: event types, facts, research
+fields, hooks, claim rules, titles, clip rules, writer slots, templates, tags and search. Each edit is checked as
+you type and cannot be saved while a problem remains. Saving changes only the lines you changed, so your
+comments and layout stay. The YAML tab shows the file as written and saves your text as typed. "New or copy"
+starts a preset from another one; deleting a preset moves its videos to General. The workspace header's preset
+popover links to the editor.
 
 ## How events are found
 

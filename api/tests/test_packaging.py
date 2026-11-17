@@ -228,6 +228,7 @@ def client(tmp_path, monkeypatch):
     for key, value in {
         "INBOX_DIR": tmp_path / "inbox", "DATA_DIR": tmp_path / "data", "CONFIG_DIR": config,
         "DB_PATH": tmp_path / "db" / "app.db", "GEMINI_API_KEY": "", "ANTHROPIC_API_KEY": "",
+        "YOUTUBE_API_KEY": "", "HIGGSFIELD_API_KEY": "",
     }.items():
         monkeypatch.setenv(key, str(value))
     from app import main

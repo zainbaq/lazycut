@@ -1,4 +1,4 @@
-"""Subject research: results with sources, overrides, the paste fallback, spelling revert (BUILD_SPEC 7.7)."""
+"""Subject research: results with sources, overrides, the paste fallback, spelling revert; competitor research (BUILD_SPEC 7.7)."""
 
 from typing import Any
 
@@ -8,6 +8,7 @@ from sqlmodel import Session
 
 from app.db import session
 from app.models import Video
+from app.services import competitors as cp
 from app.services.jobs import JobRunner
 from app.services.presets import load_channel, load_presets
 from app.services.research import check_override, ensure_row, research_view
@@ -117,3 +118,48 @@ def revert_spelling(video_id: str, request: Request) -> dict:
         s.add_all([video, row])
         s.commit()
         return _view(s, video, request)
+
+
+# ---- competitor research (Phase 3) -------------------------------------------------
+
+
+@router.get("/videos/{video_id}/competitors")
+def get_competitors(video_id: str, request: Request) -> dict:
+    """The competing videos for this subject, the numbers over them and Claude's read, if any yet."""
+    settings = get_settings()
+    presets, _ = load_presets(settings.config_dir)
+    runner = _runner(request)
+    with session(request.app.state.engine) as s:
+        video = _video(s, video_id)
+        preset = presets.get(video.preset_id) or presets["general"]
+        row = cp.find_row(s, video.subject or video.title, video.topic)
+        payload = dict(row.payload) if row else None
+    query = cp.build_query(preset.competitor_query, video.topic, video.subject or video.title)
+    fresh = cp.is_fresh(payload) and (payload or {}).get("query") == query
+    return {
+        "video_id": video_id, "query": query,
+        "can_search": bool(settings.youtube_api_key), "can_read": runner.deps.can_research(),
+        "running": runner.running(video_id, "competitors") is not None,
+        "fresh": fresh, "result": payload,
+    }
+
+
+class CompetitorRun(BaseModel):
+    read_again: bool = False  # run Claude's read again on today's search
+
+
+@router.post("/videos/{video_id}/competitors", status_code=202)
+async def run_competitors(video_id: str, request: Request, body: CompetitorRun | None = None) -> dict:
+    settings = get_settings()
+    runner = _runner(request)
+    with session(request.app.state.engine) as s:
+        video = _video(s, video_id)
+        row = cp.find_row(s, video.subject or video.title, video.topic)
+        fresh = cp.is_fresh(row.payload if row else None)
+    if not fresh and not settings.youtube_api_key:
+        raise HTTPException(409, "Set YOUTUBE_API_KEY in .env to search for competing videos")
+    if body and body.read_again and not runner.deps.can_research():
+        raise HTTPException(409, "Set ANTHROPIC_API_KEY in .env for Claude's read")
+    if runner.running(video_id, "competitors"):
+        raise HTTPException(409, "Competitor research is already running")
+    return runner.start("competitors", video_id, read_again=bool(body and body.read_again)).model_dump()

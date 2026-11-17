@@ -205,6 +205,15 @@ class LibraryItem(SQLModel, table=True):
     url: str = ""
     playlist: str = ""
     published_at: str | None = None
+    # Phase 3, imported from the channel (schema v5). A Short is kept for the record but never
+    # counts as an end-screen target or a repeat of a subject.
+    youtube_id: str | None = Field(default=None, index=True)
+    kind: str = "long"  # long | short
+    duration_s: float | None = None
+    views: int | None = None
+    # How topic and subject were filled: "playlist" / "repeated" (read from the title), "you"
+    # (typed or edited by the owner), or "" (not read). A re-import never overwrites "you".
+    read_by: str = ""
 
 
 class Thumbnail(SQLModel, table=True):

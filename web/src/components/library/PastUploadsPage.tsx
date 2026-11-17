@@ -6,6 +6,8 @@ import Link from "next/link";
 import { useId, useMemo, useState } from "react";
 
 import { ErrorCard } from "@/components/ui/Cards";
+
+import { ImportButton, ImportPanel, useImportStatus } from "./ChannelImport";
 import { Rail } from "@/components/ui/Rail";
 import { dayDate, isLink, plural, toDateInput } from "@/lib/format";
 import { panelRise } from "@/lib/motion";
@@ -158,6 +160,31 @@ function ItemForm({
   );
 }
 
+function compact(n: number): string {
+  return n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1).replace(/\.0$/, "")}k` : String(n);
+}
+
+const chip = "inline-flex min-h-6 items-center gap-1 rounded-[12px] border border-line3 px-2 text-[11px] text-fg2";
+
+function Markers({ item }: { item: LibraryItem }) {
+  return (
+    <span className="flex flex-wrap items-center gap-1.5">
+      <FromAppMarker item={item} />
+      {item.kind === "short" ? (
+        <span className={chip} title="A Short: kept for the record; never an end-screen target or a repeat">
+          Short
+        </span>
+      ) : null}
+      {item.source === "youtube" && item.kind === "long" && item.read_by === "" ? (
+        <span className={`${chip} border-warnline text-warn`} title="The title could not be read: fill in topic and subject">
+          To check
+        </span>
+      ) : null}
+      {item.views != null ? <span className="tnum text-[11px] text-fg3">{compact(item.views)} views</span> : null}
+    </span>
+  );
+}
+
 function FromAppMarker({ item }: { item: LibraryItem }) {
   if (!item.from_app || !item.video_id) return null;
   return (
@@ -189,7 +216,7 @@ function TitleCell({ item }: { item: LibraryItem }) {
       ) : (
         <span className="break-words font-semibold">{item.title}</span>
       )}
-      <FromAppMarker item={item} />
+      <Markers item={item} />
     </span>
   );
 }
@@ -261,6 +288,15 @@ type Mode = { id: string; kind: "edit" | "delete" } | null;
 
 const cell = "px-3 py-2.5 align-top text-fg2";
 const muted = (v: string) => (v ? v : <span className="text-fg4">–</span>);
+/** Topic, subject and angle read from the title (not typed) look a shade quieter, with a note on hover. */
+const read = (item: LibraryItem, v: string) =>
+  v && (item.read_by === "playlist" || item.read_by === "repeated") ? (
+    <span className="text-fg3" title="Read from the title. Edit to correct it; an import never overwrites your edit.">
+      {v}
+    </span>
+  ) : (
+    muted(v)
+  );
 
 function Table({ items, mode, setMode }: { items: LibraryItem[]; mode: Mode; setMode: (m: Mode) => void }) {
   return (
@@ -302,9 +338,9 @@ function Table({ items, mode, setMode }: { items: LibraryItem[]; mode: Mode; set
                 <td className={`${cell} text-fg`}>
                   <TitleCell item={item} />
                 </td>
-                <td className={`${cell} break-words`}>{muted(item.subject)}</td>
-                <td className={`${cell} break-words`}>{muted(item.topic)}</td>
-                <td className={`${cell} break-words`}>{muted(item.angle)}</td>
+                <td className={`${cell} break-words`}>{read(item, item.subject)}</td>
+                <td className={`${cell} break-words`}>{read(item, item.topic)}</td>
+                <td className={`${cell} break-words`}>{read(item, item.angle)}</td>
                 <td className={`${cell} break-words`}>{muted(item.hook)}</td>
                 <td className={`${cell} break-words`}>{muted(item.playlist)}</td>
                 <td className={`${cell} tnum`}>{item.published_at ? dayDate(item.published_at) : muted("")}</td>
@@ -394,7 +430,7 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
         angle.
       </span>
       <span className="text-fg3">
-        Add them by hand here. A video you finish in LazyCut joins the list when you use “Mark as published” in its workspace.
+        Import them from your channel with “Import from YouTube”, or add them by hand here. A video you finish in LazyCut joins the list when you use “Mark as published” in its workspace.
       </span>
       <button type="button" onClick={onAdd} className={primaryBtn}>
         <Plus aria-hidden="true" size={14} />
@@ -404,13 +440,34 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
   );
 }
 
+type Show = "long" | "short" | "unread" | "all";
+const SHOWS: { id: Show; label: string }[] = [
+  { id: "long", label: "Videos" },
+  { id: "short", label: "Shorts" },
+  { id: "unread", label: "To check" },
+  { id: "all", label: "All" },
+];
+
+function shown(item: LibraryItem, show: Show): boolean {
+  if (show === "all") return true;
+  if (show === "short") return item.kind === "short";
+  if (show === "unread") return item.kind === "long" && item.source === "youtube" && item.read_by === "";
+  return item.kind !== "short";
+}
+
 export function PastUploadsPage() {
   const reduce = useReducedMotion();
   const { data, error, isLoading, refetch } = useLibrary();
+  const importStatus = useImportStatus();
+  const [show, setShow] = useState<Show>("long");
   const add = useAddLibraryItem();
   const [adding, setAdding] = useState(false);
   const [mode, setMode] = useState<Mode>(null);
-  const items = useMemo(() => newestFirst(data ?? []), [data]);
+  const items = useMemo(() => newestFirst((data ?? []).filter((i) => shown(i, show))), [data, show]);
+  const counts = useMemo(
+    () => Object.fromEntries(SHOWS.map((s) => [s.id, (data ?? []).filter((i) => shown(i, s.id)).length])) as Record<Show, number>,
+    [data],
+  );
 
   const openAdd = () => {
     add.reset();
@@ -424,18 +481,42 @@ export function PastUploadsPage() {
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex flex-wrap items-center gap-3 border-b border-line bg-raised px-[18px] py-2.5">
           <h1 className="font-head text-[16px]">Past uploads</h1>
-          {data ? <span className="text-fg3">{plural(data.length, "video")}</span> : null}
-          <button type="button" onClick={openAdd} disabled={adding} className={`ml-auto ${primaryBtn} rounded-[22px] px-4`}>
-            <Plus aria-hidden="true" size={14} />
-            Add past upload
-          </button>
+          {data ? <span className="text-fg3">{plural(data.length, "upload")}</span> : null}
+          <span className="ml-auto flex flex-wrap gap-2">
+            <ImportButton status={importStatus.data} />
+            <button type="button" onClick={openAdd} disabled={adding} className={`${primaryBtn} rounded-[22px] px-4`}>
+              <Plus aria-hidden="true" size={14} />
+              Add past upload
+            </button>
+          </span>
         </header>
 
         <main className="mx-auto flex w-full max-w-[1180px] flex-col gap-4 px-4 py-5 min-[720px]:px-6">
           {data && data.length > 0 ? (
             <p className="max-w-3xl text-fg3">
-              Used for the package’s end-screen target and the repeat-video warning. Newest first.
+              Used for the package’s end-screen target and the repeat-video warning. Shorts are kept for the record but count
+              for neither. Newest first.
             </p>
+          ) : null}
+          {importStatus.data ? <ImportPanel status={importStatus.data} onShowUnread={() => setShow("unread")} /> : null}
+          {importStatus.error ? <ErrorCard title="Could not read the import status" message={importStatus.error.message} /> : null}
+          {data && data.length > 0 ? (
+            <div role="radiogroup" aria-label="Show" className="flex flex-wrap gap-1.5 self-start rounded-[10px] border border-line3 p-0.5">
+              {SHOWS.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={show === s.id}
+                  onClick={() => setShow(s.id)}
+                  className="flex min-h-10 items-center gap-1.5 rounded-[8px] px-3 text-[12px] transition-colors duration-200"
+                  style={{ background: show === s.id ? "var(--surface-2)" : "transparent", color: show === s.id ? "var(--text)" : "var(--text-3)" }}
+                >
+                  {s.label}
+                  <span className="tnum text-[11px] text-fg3">{counts[s.id]}</span>
+                </button>
+              ))}
+            </div>
           ) : null}
 
           <AnimatePresence initial={false}>
@@ -485,6 +566,7 @@ export function PastUploadsPage() {
             </div>
           ) : null}
           {data && data.length === 0 && !adding ? <EmptyState onAdd={openAdd} /> : null}
+          {data && data.length > 0 && !items.length ? <span className="text-fg3">Nothing to show here.</span> : null}
           {items.length ? (
             <>
               <Table items={items} mode={mode} setMode={setMode} />

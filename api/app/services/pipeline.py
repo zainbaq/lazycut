@@ -72,6 +72,8 @@ class Deps:
     suggest_client: Callable[[], Any] = lambda: None
     # The image-generation client (higgsfield.ImageClient); None when no Higgsfield key is set.
     image_client: Callable[[], Any] = lambda: None
+    # The YouTube Data API client (youtube.YouTubeClient); None when no YouTube key is set.
+    youtube_client: Callable[[], Any] = lambda: None
 
     def can_watch(self) -> bool:
         return self.video_provider(lambda _msg: None) is not None

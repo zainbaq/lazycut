@@ -6,6 +6,7 @@ import { api } from "./api";
 import type {
   Aspect,
   Clip,
+  CompetitorsView,
   ClipFind,
   ClipList,
   ClipPatch,
@@ -19,6 +20,8 @@ import type {
   PackageEdit,
   PackageList,
   PackageRegenerate,
+  NewPreset,
+  PresetDoc,
   PublishBody,
   Research,
   ResearchEdit,
@@ -36,6 +39,8 @@ import type {
 export const keys = {
   configStatus: ["config-status"] as const,
   presets: ["presets"] as const,
+  presetDoc: (id: string) => ["presets", id] as const,
+  presetYaml: (id: string) => ["presets", id, "yaml"] as const,
   imports: ["imports"] as const,
   videos: ["videos"] as const,
   video: (id: string) => ["video", id] as const,
@@ -43,9 +48,11 @@ export const keys = {
   facts: (id: string) => ["facts", id] as const,
   frames: (id: string) => ["frames", id] as const,
   research: (id: string) => ["research", id] as const,
+  competitors: (id: string) => ["competitors", id] as const,
   packages: (id: string) => ["packages", id] as const,
   allPackages: ["packages"] as const,
   library: ["library"] as const,
+  libraryImport: ["library", "import"] as const,
   thumbnails: (id: string) => ["thumbnails", id] as const,
   clips: (id: string) => ["clips", id] as const,
   thumbSettings: ["thumb-settings"] as const,
@@ -56,6 +63,39 @@ export const useConfigStatus = () =>
   useQuery({ queryKey: keys.configStatus, queryFn: api.configStatus, staleTime: 30_000 });
 
 export const usePresets = () => useQuery({ queryKey: keys.presets, queryFn: api.presets, staleTime: 60_000 });
+
+// ---- Preset editor (5) ----
+
+export const usePresetDoc = (id: string) => useQuery({ queryKey: keys.presetDoc(id), queryFn: () => api.presetDoc(id) });
+
+export const usePresetYaml = (id: string) => useQuery({ queryKey: keys.presetYaml(id), queryFn: () => api.presetYaml(id) });
+
+/** After any preset write: the list, the editor and every video (labels follow the preset) refresh. */
+function afterPresetWrite(qc: ReturnType<typeof useQueryClient>) {
+  void qc.invalidateQueries({ queryKey: keys.presets });
+  void qc.invalidateQueries({ queryKey: keys.configStatus });
+  void qc.invalidateQueries({ queryKey: keys.videos });
+  void qc.invalidateQueries({ queryKey: ["video"] });
+}
+
+export function useSavePreset(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { form: PresetDoc } | { yaml: string }) =>
+      "form" in body ? api.savePreset(id, body.form) : api.savePresetYaml(id, body.yaml),
+    onSuccess: () => afterPresetWrite(qc),
+  });
+}
+
+export function useCreatePreset() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (body: NewPreset) => api.createPreset(body), onSuccess: () => afterPresetWrite(qc) });
+}
+
+export function useDeletePreset() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (id: string) => api.deletePreset(id), onSuccess: () => afterPresetWrite(qc) });
+}
 
 export const useImports = () => useQuery({ queryKey: keys.imports, queryFn: api.imports });
 
@@ -111,6 +151,26 @@ export function jobOf(video: Video | undefined, kind: string): Job | undefined {
 export const isActive = (job: Job | undefined) => job?.status === "queued" || job?.status === "running";
 
 export const useResearch = (id: string) => useQuery({ queryKey: keys.research(id), queryFn: () => api.research(id) });
+
+/** Competitor research (7.7): polled while its job runs. */
+export const useCompetitors = (id: string) =>
+  useQuery({
+    queryKey: keys.competitors(id),
+    queryFn: () => api.competitors(id),
+    refetchInterval: (q) => (q.state.data?.running ? 1500 : false),
+  });
+
+/** One YouTube search (free quota, cached a day) and, with a Claude key, one paid read (about 5 cents). */
+export function useRunCompetitors(videoId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (readAgain: boolean) => api.runCompetitors(videoId, readAgain),
+    onSuccess: () => {
+      qc.setQueryData<CompetitorsView>(keys.competitors(videoId), (v) => (v ? { ...v, running: true } : v));
+      void qc.invalidateQueries({ queryKey: keys.competitors(videoId) });
+    },
+  });
+}
 
 /** Start research. Without `pasted_text` this is a paid Claude call with web search. */
 export function useRunResearch(videoId: string) {
@@ -287,6 +347,40 @@ export function useUpdateFact(videoId: string) {
 // ---- past uploads and publishing ----------------------------------------------------
 
 export const useLibrary = () => useQuery({ queryKey: keys.library, queryFn: api.library });
+
+/** The channel import (Phase 3): polled while a job runs; the list refreshes when it ends. */
+export function useImportStatus() {
+  const qc = useQueryClient();
+  return useQuery({
+    queryKey: keys.libraryImport,
+    queryFn: async () => {
+      const status = await api.importStatus();
+      const was = qc.getQueryData<{ running: unknown }>(keys.libraryImport)?.running;
+      if (was && !status.running) void qc.invalidateQueries({ queryKey: [keys.library[0]], exact: true });
+      return status;
+    },
+    refetchInterval: (q) => (q.state.data?.running ? 1200 : false),
+  });
+}
+
+export function useStartImport() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.startImport(),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: keys.libraryImport }),
+  });
+}
+
+export function useAddPlaylists() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: string[]) => api.addPlaylists(ids),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: keys.libraryImport });
+      void qc.invalidateQueries({ queryKey: keys.configStatus });
+    },
+  });
+}
 
 /** Past uploads feed every package's end-screen target and repeat check, which the server
  * refreshes on the next package GET, so all package lists are refetched. */

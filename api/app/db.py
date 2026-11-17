@@ -8,7 +8,7 @@ from sqlmodel import Session, SQLModel, create_engine
 
 from app import models  # noqa: F401 - registers the tables on SQLModel.metadata
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 def _add_event_edited(conn) -> None:
@@ -45,9 +45,20 @@ def _add_clip_columns(conn) -> None:
     })
 
 
+def _add_library_columns(conn) -> None:
+    """Phase 3: past uploads imported from the channel."""
+    _add_columns(conn, "library_item", {
+        "youtube_id": "VARCHAR", "kind": "VARCHAR NOT NULL DEFAULT 'long'", "duration_s": "FLOAT",
+        "views": "INTEGER", "read_by": "VARCHAR NOT NULL DEFAULT ''",
+    })
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_library_item_youtube_id ON library_item (youtube_id)"))
+    # Entries made before this version were typed in by hand or came from "Mark as published".
+    conn.execute(text("UPDATE library_item SET read_by = 'you' WHERE read_by = '' AND (subject != '' OR topic != '')"))
+
+
 # version -> step that brings the schema from version - 1 to version. New tables come
 # from create_all; a step is only needed for a change to an existing table.
-MIGRATIONS: dict[int, Callable] = {3: _add_event_edited, 4: _add_clip_columns}
+MIGRATIONS: dict[int, Callable] = {3: _add_event_edited, 4: _add_clip_columns, 5: _add_library_columns}
 
 
 def make_engine(db_path: Path) -> Engine:

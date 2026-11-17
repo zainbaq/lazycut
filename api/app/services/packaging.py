@@ -78,7 +78,8 @@ def gather(s: Session, video: Video, preset: Preset, channel: ChannelProfile | N
     past = [
         {"title": i.title, "subject": i.subject, "topic": i.topic, "angle": i.angle, "url": i.url,
          "playlist": i.playlist, "published_at": i.published_at}
-        for i in s.exec(select(LibraryItem)).all() if i.video_id != video.id
+        # A Short is not an end-screen target and does not make a subject a repeat.
+        for i in s.exec(select(LibraryItem)).all() if i.video_id != video.id and i.kind != "short"
     ]
     demand_row = search_demand.find_row(s, row)
     inp = Inputs(

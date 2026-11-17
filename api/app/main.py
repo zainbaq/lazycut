@@ -6,8 +6,21 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.db import init_db, make_engine
-from app.routers import clips, config, events, jobs, library, packages, research, thumbnails, videos
+from app.routers import (
+    clips,
+    config,
+    events,
+    jobs,
+    library,
+    packages,
+    presets,
+    research,
+    thumbnails,
+    videos,
+)
+from app.services.channel_import import channel_import_job
 from app.services.clip_jobs import clip_export_job, clip_find_job, clip_package_job, clip_refine_job
+from app.services.competitor_jobs import competitors_job
 from app.services.higgsfield import Higgsfield
 from app.services.jobs import Bus, JobRunner
 from app.services.llm.anthropic import ClaudeProvider
@@ -16,6 +29,7 @@ from app.services.llm.gemini import GeminiProvider
 from app.services.pipeline import Deps, analysis_job, import_job, package_job, research_job
 from app.services.search_demand import YouTubeSuggest
 from app.services.thumbnail_jobs import thumb_frames_job, thumbnail_job
+from app.services.youtube import YouTubeData
 from app.settings import Settings, get_settings
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -57,7 +71,9 @@ async def lifespan(app: FastAPI):
     images = (Higgsfield(settings.higgsfield_credential, settings.higgsfield_base_url)
               if settings.higgsfield_credential else None)
     runner = JobRunner(engine, bus, Deps(settings, gemini_factory(settings), claude_factory(settings),
-                                         suggest_client=lambda: suggest, image_client=lambda: images))
+                                         suggest_client=lambda: suggest, image_client=lambda: images,
+                                         youtube_client=lambda: YouTubeData(settings.youtube_api_key)
+                                         if settings.youtube_api_key else None))
     runner.register("import", import_job)
     runner.register("analysis", analysis_job)
     runner.register("research", research_job)
@@ -68,6 +84,8 @@ async def lifespan(app: FastAPI):
     runner.register("clip_export", clip_export_job)
     runner.register("clip_package", clip_package_job)
     runner.register("clip_refine", clip_refine_job)
+    runner.register("channel_import", channel_import_job)
+    runner.register("competitors", competitors_job)
     runner.recover()
     app.state.engine, app.state.bus, app.state.runner = engine, bus, runner
     yield
@@ -84,6 +102,7 @@ app.add_middleware(
     expose_headers=["Content-Range", "Accept-Ranges", "Content-Length", "Content-Disposition"],
 )
 app.include_router(config.router)
+app.include_router(presets.router)
 app.include_router(videos.router)
 app.include_router(jobs.router)
 app.include_router(events.router)

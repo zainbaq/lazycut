@@ -78,6 +78,7 @@ tag_recipe: [topic_variants, subject_names, difficulty_terms, questline_area, me
 banned_tags:                  # removed automatically unless research says the label is accurate
   - {tag: soulslike, unless: {research: is_soulslike, op: eq, value: true}}
 search_seeds: ["{topic} boss", "{topic} bosses", "{topic} {name} boss fight", "how to beat {name}"]
+competitor_query: "{topic} {subject} boss fight"   # the YouTube search for competing videos (7.7)
 search_fit: >-
   This video is one boss fight from start to kill. "boss fight", "bosses", "boss battle", "boss gameplay",
   "how to beat" and "boss guide" fit; "walkthrough", "part 1", "full game", "gameplay" of the whole game,

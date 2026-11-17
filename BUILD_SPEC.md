@@ -67,7 +67,7 @@ A faceless YouTube gaming channel (TheLazyRonin) posting skilled boss-fight runs
 | D19 | Timestamp accuracy is handled three ways: a higher sampling rate on the full pass, an on-demand refine pass, and an eye-test review mode where the user corrects and verifies events | Browser tests of Gemini were decent but not exact |
 | D20 | Exports keep the source frame rate and use a near-lossless encode. A 9:16 export is scaled to 1080×1920 | Owner wants the best quality and frame rate the source allows |
 | D21 | Re-analysis keeps the user's own events, verified events and confirmed facts unless the user chooses to discard them. A warning dialog always shows first | User work must not be lost silently |
-| D22 | Past uploads are typed in by hand in v1. Import from the YouTube channel comes in Phase 3 | Simplest start |
+| D22 | Past uploads are typed in by hand in v1. Import from the YouTube channel comes in Phase 3 (built: 7.14) | Simplest start |
 | D23 | No per-game record in v1. A video carries its topic name and optional extra terms; research is shared between videos by matching names | Not needed yet |
 | D24 | Gemini is used only to watch video. All other reasoning (research, clip finding, writing) runs on Claude through the Anthropic API | Owner's decision, 2026-11-14: Gemini is the only API that reads video; Claude does everything else |
 | D26 | Thumbnails are generated in the app through Higgsfield's API (7.13). The image model only paints: LazyCut picks the source, writes the prompt, draws the result word itself by default, sizes the file and has Claude review the result. The model and its options are a setting | Owner's decision, 2026-11-15: keep the usual Higgsfield flow (frame in, 16:9 out, check faces, hands and HUD) but inside the app; Higgsfield's public API (key pair) makes it possible |
@@ -261,7 +261,7 @@ Use string UUIDs for ids, UTC ISO timestamps, JSON columns for nested data. Open
 | `research` | id, subject_key, topic_key, kind (`subject`\|`competitors`), payload (JSON), overrides (JSON: fields the user changed), sources (JSON list of {title,url,credible}), created_at. Keys are the lower-cased, punctuation-stripped names, so a second video on the same subject reuses the row |
 | `package` | id, video_id, clip_id (nullable), platform (`youtube`\|`shorts`\|`reels`\|`tiktok`), fields (JSON), alternates (JSON), edited_fields (JSON list), rule_results (JSON), inputs_hash, version, created_at |
 | `job` | id, video_id, kind, status (`queued`\|`running`\|`done`\|`error`), progress (0–1), message, error, created_at, updated_at |
-| `library_item` | id, video_id (nullable), title, subject, topic, angle, hook, url, playlist, published_at. Past uploads, used for end-screen targets and cannibalization checks |
+| `library_item` | id, video_id (nullable), title, subject, topic, angle, hook, url, playlist, published_at; Phase 3 (schema v5): youtube_id, kind (`long`\|`short`), duration_s, views, read_by (`playlist`\|`repeated`\|`you`\|"" = how topic and subject were filled). Past uploads, used for end-screen targets and cannibalization checks (Shorts count for neither) |
 | `llm_call` | id, job_id, provider, model, purpose, prompt, tokens_in, tokens_out, latency_ms, status, created_at |
 
 Notes:
@@ -278,7 +278,7 @@ Create tables at startup if missing. No Alembic in v1; keep a `schema_version` r
 
 A preset adapts the generic engine to one kind of content. Presets are optional. With none chosen the video uses `general`. Everything niche-specific lives here and is user-defined (D17): event vocabulary, facts, hooks, claim rules, title patterns and short-form templates. The core never mentions hits, bosses or damage.
 
-The user can switch preset per video from the workspace header and view what a preset defines. Editing: Phase 1 ships a raw YAML editor with validation; the form editor comes in Phase 3.
+The user can switch preset per video from the workspace header and view what a preset defines. Editing (as built in Phase 3, `/settings/presets/[id]`): a form with one section per part of the schema and a YAML tab for the file as written. Both check the edit on the server while the owner types and refuse to save while a problem remains. A form save is merged into the file, so every untouched line stays byte for byte, comments and column alignment included. Ids already saved (event types, facts, research fields, hooks, claim rules) are locked in the form because events and records refer to them; the YAML tab can rename them. New presets start as a copy of another (its comments kept) or of General.
 
 Switching preset re-labels the UI immediately. It marks analysis as stale only if the event vocabulary changed, and offers "Re-analyze with this preset" (7.12). Events whose type the new preset does not define stay visible with a neutral chip until re-analysis.
 
@@ -369,6 +369,7 @@ tag_recipe: [topic_variants, subject_names, difficulty_terms, questline_area, me
 banned_tags:                  # removed automatically unless research says the label is accurate
   - {tag: soulslike, unless: {research: is_soulslike, op: eq, value: true}}
 search_seeds: ["{topic} boss", "{topic} bosses", "{topic} {name} boss fight", "how to beat {name}"]   # 7.7.1
+competitor_query: "{topic} {subject} boss fight"   # 7.7 similar-video research; only {topic} and {subject}
 search_fit: "This video is one boss fight ... 'boss fight' and 'how to beat' fit; 'walkthrough' does not."
 fallback_hashtags: ["#BossFight", "#Gameplay"]
 playlist_name: "{topic} — All Boss Fights"
@@ -773,6 +774,15 @@ The package is chosen by what people actually type into YouTube, not by the writ
 - Output per video: title, channel, subscribers, views, age, duration, thumbnail URL. Analysis (text model): shared title patterns, common thumbnail words, the unclaimed angle, and a demand-versus-competition read.
 - Cannibalization: fuzzy match the subject against `library_item`. If found, warn and list existing angles.
 
+**Similar-video research as built (Phase 3, `services/competitors.py`, `services/competitor_jobs.py`).** A `competitors` job from the research page ("Find competitors").
+- **Search.** The preset's `competitor_query` (General `{topic} {subject}`, Boss fight `{topic} {subject} boss fight`), `search.list` for 25 videos (English, US), then `videos.list` and `channels.list`: 102 quota units. Kept as a `research` row with `kind = competitors` and reused for 24 hours; a later run inside that window repeats only Claude's read if asked ("Read again").
+- **Numbers (code), over the first 15 videos from other channels** (yours are marked and left out):
+  - each video's views per day and its outlier, its views against its channel's average per video, so a small channel's breakout shows (2× or more is badged);
+  - how concentrated the views are: the Herfindahl index of view shares, which economists use for market concentration. Below 0.15 is "spread out", 0.15 to 0.25 "moderate", above "concentrated" (the US merger guidelines' bands);
+  - the share of views won by channels under 10k subscribers, how many were posted in the last 30 days, and the median views per day.
+- **Claude's read (one call, about 5 cents; measured 6.1k tokens in, 0.9k out, 10 s).** The first 15 titles with those numbers, the first 10 thumbnails as stills (D24: Claude reads stills, Gemini watches video), the confirmed facts and the eligible hooks. It returns shared title patterns, the angles taken, the words printed on the thumbnails and their common look, 1 to 3 unclaimed angles, each with why it is open and what backs it, and a plain read of whether the subject is worth a video for a channel this size. Code checks each suggested angle against the preset's claim rules and flags one the facts do not back.
+- **Tested before it went in (2026-11-17, three Phantom Blade Zero bosses, 408 quota units):** a phrase-level gap (search-suggestion demand against how many top titles carry the phrase) surfaced only game-wide searches ("phantom blade zero cinematic", "… jp"), because every boss-fight title already carries the boss's name. That idea was dropped: for this kind of video the gap is in the angle, which is the read's job. The outlier and the concentration held up: Gate Keeper's views were spread out (Herfindahl 0.10 to 0.14, leader 15 to 22%), Sword Fanatic's leaned on Fextralife's 74k-view guide. In the app, Gate Keeper's read proposed a shield-breaking breakdown (every thumbnail shows the shield, no title explains it) and "Took 11 hits and still won", backed by the confirmed fact.
+
 ### 7.8 Packaging
 
 One generation call per platform, text model, JSON output, built from: channel profile, preset, confirmed facts, effective research values, event timeline summary, selected clip (for short platforms), past uploads (for the end-screen target).
@@ -991,6 +1001,17 @@ The owner's flow before the app: upload a gameplay frame to Higgsfield, generate
    Final score = 60% Claude + 40% code. Without a Claude key the code ranking stands. Claude reads stills only; Gemini still does all video watching (D24).
 4. The result is saved as `thumbs/frames.json` in the video's media folder.
 
+### 7.14 Past uploads from the channel (Phase 3; as built: `services/youtube.py`, `services/title_reader.py`, `services/channel_import.py`)
+
+"Import from YouTube" on the Past uploads page runs a `channel_import` job. It needs `YOUTUBE_API_KEY` and `handle` in `channel.yaml`, and costs quota, not money: 19 units for the owner's 120 uploads and 11 playlists (of 10,000 a day).
+
+- **Read.** `channels.list` by handle, the uploads playlist (`playlistItems.list`), `videos.list` for title, date, length and views, then `playlists.list` and each playlist's members.
+- **Shorts.** The API has no Shorts flag, and length is not enough (the owner's 1:25 and 1:32 boss fights are long videos). Each new upload of 3 minutes or less is checked at `youtube.com/shorts/<id>`, which answers 200 for a Short and redirects otherwise. It is unofficial and free; when it does not answer, 60 s or less counts as a Short. An imported upload keeps its kind. A Short is kept for the record but is never an end-screen target or a repeat.
+- **Titles (no model call).** The owner's titles use at least six layouts over three years ("Game - Boss Boss Fight (angle)", "Boss - Game Bossfight", "Boss (angle) - Game", "Boss || Game", "Game: Boss", "Boss in Game: DLC"). Instead of a pattern per layout, the reader uses the channel itself as evidence. Each title is cut at ` - `, ` | ` and ` || `. The piece that names a playlist (or a topic in `channel.yaml` or the app) or recurs in two or more titles (two words or more) is the game. A known name runs on over a recurring subtitle ("Elden Ring: Shadow of the Erdtree"). Brackets, `|` tails and the presets' claim phrases ("No Damage", "Final Boss") are the angle; the rest is the subject. Tested on the real channel before it went in: 77 of 78 long titles read with a game and a subject (the miss is a fighting-game video, left "to check"); a few subjects keep a word of angle ("Bullying Radahn").
+- **Merge.** By YouTube id, or by the link of an entry typed in or made by "Mark as published". Title, views, length and kind follow YouTube. A topic, subject or angle the owner typed or edited (`read_by = you`) is never overwritten; one read from the title is re-read on each import. Nothing is deleted.
+- **Playlists.** The summary lists the channel's playlists and which ones `channel.yaml` lacks (matched by list id); the page offers to add them, keeping every other line of the file. Measured: the Onimusha id `PLRXz5KwhnmcA` is exactly what the API returns (newer playlist ids are short), and Phantom Blade Zero has a playlist (`PLRqBAd29j2jY`).
+- **Repeats (`cannibalization`, 7.9).** A past upload counts when it is about the same game (a missing game counts; "Elden Ring: Shadow of the Erdtree" and "Elden Ring" are the same game) and its subject or title holds one of the subject's names: as typed, the canonical name and its first comma part, the real name, the nicknames.
+
 ---
 
 ## 8. API
@@ -1002,8 +1023,10 @@ Served at the root of `http://localhost:8000`. JSON unless noted. All list endpo
 | GET | `/health` | Liveness |
 | GET | `/config/channel` · PUT | Read / update channel profile |
 | GET | `/config/status` | Config validation errors, active models, which API keys are set |
-| GET | `/presets` · POST | List / create presets |
-| GET | `/presets/{id}` · PUT · DELETE | Read / update / delete (cannot delete `general`) |
+| GET | `/presets` · POST | List / create presets (`{id, name, copy_from?}`) |
+| GET | `/presets/{id}` · PUT · DELETE | Read / update (the whole preset, merged into the file) / delete (cannot delete `general` or the channel's default; its videos switch to `general`) |
+| GET | `/presets/{id}/yaml` · PUT | The file as written / save YAML text as typed once it validates |
+| POST | `/presets/{id}/check` | Validate a form or YAML edit without saving: `{ok, problems: [{path, message}]}` |
 | GET | `/imports` | Files available in the import sources, with an already-imported flag |
 | POST | `/videos` | `{source, ref, title, subject, topic, topic_terms, kind, preset_id}` → video + import job |
 | GET | `/videos` | Video list with derived status |
@@ -1029,6 +1052,7 @@ Served at the root of `http://localhost:8000`. JSON unless noted. All list endpo
 | POST | `/clips/{id}/export` | `{crop: none\|9x16, mode: accurate\|lossless}` → job |
 | GET | `/exports/{id}/download` | Exported file |
 | POST | `/videos/{id}/research` | Run subject research (`{}` searches; `{pasted_text, source_url?}` sorts the user's notes). Competitor research joins in Phase 3 |
+| GET | `/videos/{id}/competitors` · POST | Competitor research: the cached search, numbers and read / run it (`{read_again?}`) |
 | GET | `/videos/{id}/research` | Latest results with sources and effective values |
 | PATCH | `/videos/{id}/research` | `{key, value}` sets a field override; `{key, restore: true}` clears it |
 | POST | `/videos/{id}/research/revert-spelling` | Undo the subject spelling correction |
@@ -1038,6 +1062,8 @@ Served at the root of `http://localhost:8000`. JSON unless noted. All list endpo
 | POST | `/packages/{id}/regenerate` | `{field}` or `{all: true, replace_edits: false}` |
 | GET | `/videos/{id}/export.md` | Markdown export of all packages |
 | GET | `/library` · POST · PATCH · DELETE | Past uploads |
+| GET | `/library/import` · POST | The channel import's status and last summary / start it (7.14) |
+| POST | `/library/playlists` | Add playlists found by the last import to `channel.yaml` |
 | GET | `/videos/{id}/thumbnails` | Thumbnails (newest first), word choices, found frames, uploads, settings, whether generation is possible |
 | POST | `/videos/{id}/thumbnails/frames` | Run the frame finder (7.13.1) → job |
 | POST | `/videos/{id}/thumbnails/uploads` | Raw image body (`Content-Type` image/jpeg, png or webp) → `{id, url}`; GET `/videos/{id}/thumbnails/uploads/{name}` serves it |
@@ -1079,7 +1105,7 @@ Markdown export filename: `{Channel}_{Topic}_{Subject}_YouTube_SEO.md`, with spa
 | `/v/[id]/thumbnail` | Frame picker, result-word options, prompt to copy |
 | `/past-uploads` | Past uploads: a table with add, edit and delete |
 | `/settings/channel` | Channel profile form |
-| `/settings/presets` | Preset list, viewer, YAML editor |
+| `/settings/presets` | Preset list, viewer, YAML editor. As built: `/settings/presets/[id]` with the list beside a form and a YAML tab (`/settings/presets` opens General) |
 
 Build `/new` and `/v/[id]` first. The other routes can ship as simple functional pages in the same style.
 
@@ -1269,7 +1295,7 @@ The original plan for this phase, kept for reference:
 
 **Phase 1 — Understand and package**
 
-Status on 2026-11-15: steps 1 to 7 are built (step 7: past uploads typed in by hand, "Mark as published" and "Unpublish"; step 4: event editing with undo, review mode, facts confirmation; schema version 3 adds `event.edited`. Step 5: subject research with sources, overrides, spelling correction and the paste fallback. Step 6: the YouTube long-form package, template variables, the rules engine, the package panel and drawer, Markdown export). Not yet built from those steps: `PUT /config/channel` and the preset write endpoints (the preset editor is Phase 3). Since then: search demand (7.7.1) picks titles and tags from measured YouTube search suggestions, with the owner's SEO playbook in the boss-fight preset. Also built: the thumbnail creator (7.13, from Phase 3). The API payloads are in `api/API_SHAPES.md`.
+Status on 2026-11-15: steps 1 to 7 are built (step 7: past uploads typed in by hand, "Mark as published" and "Unpublish"; step 4: event editing with undo, review mode, facts confirmation; schema version 3 adds `event.edited`. Step 5: subject research with sources, overrides, spelling correction and the paste fallback. Step 6: the YouTube long-form package, template variables, the rules engine, the package panel and drawer, Markdown export). Not yet built from those steps: `PUT /config/channel`. The preset write endpoints came with the Phase 3 preset editor. Since then: search demand (7.7.1) picks titles and tags from measured YouTube search suggestions, with the owner's SEO playbook in the boss-fight preset. Also built: the thumbnail creator (7.13, from Phase 3). The API payloads are in `api/API_SHAPES.md`.
 
 Build in this order; each step is usable on its own.
 
@@ -1301,11 +1327,20 @@ Status on 2026-11-16: built, in six steps that each work on their own. The "done
 - Not built: refining a single event (`POST /events/{id}/refine`); the `clip.candidate` stream is used, `package.field` is not.
 
 **Phase 3 — Research, thumbnails and imports**
-- Competitor research with YouTube Data API and caching; gap analysis; cannibalization.
-- Past uploads imported from the YouTube channel.
+
+Status on 2026-11-16: in progress. The owner's go-ahead was "go to phase 3". Build order, each step usable on its own:
+
+1. Preset form editor (5). **Built**: the form and YAML tab, create from a copy, delete, live checks, saves that keep the file's comments and layout.
+2. Past uploads imported from the channel, with the channel's playlists (7.14). **Built**: 120 uploads of the owner's channel imported in the app (78 videos, 42 Shorts, 19 quota units, no paid call).
+3. Competitor research and gap analysis (7.7). **Built**: run in the app on Gate Keeper (102 quota units and one Claude read, about 5 cents).
+4. Google Drive import: in-app OAuth or the Drive-for-desktop folder (7.1); the owner decides.
+5. The end-to-end run and the documents.
+
+- Competitor research with YouTube Data API and caching; gap analysis; cannibalization. **Built (step 3, 7.7; cannibalization in 7.14).**
+- Past uploads imported from the YouTube channel. **Built (step 2, 7.14).** Cannibalization now matches the subject's names within the same game.
 - Google Drive import source.
 - Thumbnail page: frame picker, result words, prompt builder. **Built early (2026-11-15) as the thumbnail creator (7.13, D26)**, with Higgsfield generation, the frame finder, uploads, the word overlay, Claude review and an Advanced settings page.
-- Preset form editor.
+- Preset form editor. **Built (step 1).**
 
 **Phase 4 — Loop and plan (later)**
 - Performance logging against baselines; profile suggestions; next-video planner; posting plan.
@@ -1334,7 +1369,7 @@ Status on 2026-11-16: built, in six steps that each work on their own. The "done
 - Gemini free tier: lower rate limits, and free-tier content may be used to improve Google's products. Show this once in settings. Read actual limits from AI Studio; do not hard-code them.
 - Measured in Phase 0 (2026-11-14, `gemini-3.8-flash`): the free tier allowed 20 requests per day per model, and every retry counts as a request. A call that is out of quota can hang on an open connection; started in the background and polled, it reports the quota error within seconds. So: retry at most once, never retry a daily-quota error, and prefer background-and-poll for video calls. The owner enabled billing on 2026-11-15; paid calls for a 3.5-minute video at 1 fps answered in 44 to 65 s.
 - Budget calls: one full analysis per video; refine passes only on demand; clip finding and packaging are text-only and cheap. A higher sampling rate costs more tokens per analysis; Phase 0 confirms what the free tier allows.
-- YouTube Data API: free daily quota; `search.list` is the expensive call. Cache per subject for 24 h and show remaining-quota errors clearly.
+- YouTube Data API: free daily quota; `search.list` is the expensive call. Cache per subject for 24 h and show remaining-quota errors clearly. Measured: a channel import of 120 uploads costs 19 units, a competitor search 102.
 - Everything else (ffmpeg, SQLite, local disk) is free.
 
 ---
@@ -1346,7 +1381,7 @@ Status on 2026-11-16: built, in six steps that each work on their own. The "done
 3. TikTok conventions are undefined; v1 mirrors the Reel package.
 4. ~~Thumbnail generation stays outside the app in v1.~~ Replaced by D26 on 2026-11-15: thumbnails are generated through Higgsfield's API. Higgsfield's API balance is pay-as-you-go and may be separate from the web plan. Models that are on the web app but not on the API are not available, including Nano Banana and GPT Image (as of 2026-11-15).
 5. Research uses Claude's web search tool (D24). Measured on 2026-11-15 (Gate Keeper, `claude-opus-5-5`): the search call read 57k tokens in and wrote 2.9k out in 41 s, the structuring call 4.3k in and 1.1k out in 9 s; about $0.35–0.40 per run including searches ($10 per 1,000, at most 6 per run). Research runs once per subject and is reused.
-6. The Onimusha playlist id in `channel.yaml` is flagged by the owner as possibly clipped; verify before relying on it.
+6. ~~The Onimusha playlist id in `channel.yaml` is flagged by the owner as possibly clipped; verify before relying on it.~~ Verified on 2026-11-17: the YouTube Data API returns exactly `PLRXz5KwhnmcA`; newer playlist ids are this short.
 7. Hook wording in the boss-fight preset is "No Hit" (the owner's current usage), with "NO HIT" as the thumbnail word. Earlier drafts used "No Damage". The owner can change it in the YAML.
 8. `credible_domains` holds the owner's starter list, `fextralife.com` and `wikipedia.org` (2026-11-15; subdomains count). Fields that need a credible source stay locked until one of those sites backs them or the owner sets the field by hand.
 9. A video imported as `kind = clip` is treated as one ready-made clip with short-form packages only.
@@ -1362,7 +1397,7 @@ Status on 2026-11-16: built, in six steps that each work on their own. The "done
 19. Short-form platform facts are not confirmed. A search on 2026-11-16 found no official page, only third-party ones that disagree. Used until the owner corrects them: maximum length Shorts 180 s, Reels 180 s (other pages say 90 s, or longer), TikTok 600 s; caption limit 2,200 characters for Reels and for TikTok (other pages say 4,000 for TikTok); Shorts title 100 and description 5,000; Shorts and TikTok play 60 fps and Reels may show 30 fps. The lengths are in `clipfinder.PLATFORM_MAX_S`, the text limits in `rules.LENGTH_LIMITS`.
 20. An event's time is where the full pass put it. The refine pass answers 0.5 to 1.0 s later for counters, on the impact burst rather than the first glint the reviewed labels mark (7.3). Whether event times should mean the impact is open; until the owner decides, "Refine edges" is offered as experimental and nothing uses the refine pass by default.
 21. The short-form packages of a clip are written in one Claude call for every platform switched on, not one call per platform (7.8). The Phase 2 plan proposed it and the owner's go-ahead did not comment on it, so it is not yet confirmed; it can be changed back.
-22. The Shorts description template of the boss-fight preset links the topic's playlist. For a topic with no playlist in `config/channel.yaml` that line is dropped and the `link_back` rule blocks the description until a playlist is added or the text is edited (seen on Phantom Blade Zero).
+22. The Shorts description template of the boss-fight preset links the topic's playlist. For a topic with no playlist in `config/channel.yaml` that line is dropped and the `link_back` rule blocks the description until a playlist is added or the text is edited (seen on Phantom Blade Zero). Phantom Blade Zero has a playlist on the channel (`PLRqBAd29j2jY`, found by the channel import on 2026-11-17); the Past uploads page offers to add it and nine others to `channel.yaml`, which is left to the owner.
 23. The boss-fight slot `plain_hook` asks for on-screen text "with a number". With only `hits_taken` confirmed, the writer used it: the Gate Keeper Reel's on-screen text opened with "Took 11 hits all fight". It is true and it passed the rules, but the owner may want that instruction reworded.
 
 ---

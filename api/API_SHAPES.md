@@ -1,4 +1,4 @@
-# API shapes (Phases 1 and 2)
+# API shapes (Phases 1 to 3)
 
 The JSON the web app relies on. `BUILD_SPEC.md` section 8 lists the endpoints; this file fixes
 their payloads. All times are float seconds. Errors are `{"detail": "message"}` with a 4xx/5xx code.
@@ -10,9 +10,26 @@ Media URLs in payloads are paths relative to the API origin (`NEXT_PUBLIC_API_UR
 - `GET /config/status` → `{errors: [{file, problem}], channel: str|null, presets: [id], models: {video, text}, keys: {gemini, anthropic, youtube}: bool, event_detectors: [id], storage: {...}, tools: {...}}`
 - `GET /config/channel` → the channel profile as in `config/channel.yaml`, or 404
 - `GET /presets` → `[Preset]`; `GET /presets/{id}` → `Preset`
-  - `Preset = {id, name, description, event_types: [EventType], facts: [FactDef], ...rest of the YAML}`
+  - `Preset = {id, name, description, event_types: [EventType], facts: [FactDef], ...every other field of the schema (BUILD_SPEC 5.1) with its default filled in, file: "presets/<name>.yaml"|null, video_count: int}`
+  - `file` is null for the built-in General with no file yet; `file` and `video_count` are read-only and ignored when sent back
   - `EventType = {id, label, glyph: "slash"|"dot"|"ring"|"diamond", color: "accent"|"paper"|"warn"|"gold", definition, show: bool}`
   - `FactDef = {key, label, type: "int"|"text"|"bool"|"enum", options: [str], derive_from: str|null, required: bool, instructions: str|null}`
+
+### Preset editor (Phase 3)
+
+- `GET /presets/{id}/yaml` → `{id, text}`: the file as written, comments included (General with no file: a fresh dump)
+- `POST /presets/{id}/check` body `{preset: Preset}` or `{yaml: str}` → `{ok: bool, problems: [{path, message}]}`; nothing is written
+  - `path` is dotted (`event_types.0.glyph`), or the section a cross-check names (`hooks`, `templates.reel`), or `""`
+- `PUT /presets/{id}` body `Preset` (the whole preset, as the form edits it) → `Preset`
+  - Merged into the file: unchanged lines stay byte for byte (comments, quoting, column alignment); a field the file
+    already has keeps its line when set back to its default; a field set to null is removed
+  - The id cannot change (422). A preset with no file (built-in General) gets `presets/general.yaml`
+- `PUT /presets/{id}/yaml` body `{text}` → `Preset`; the text is saved as typed once it parses and validates; the id must stay
+- `POST /presets` body `{id, name, copy_from?: id}` → 201 `Preset`; a copy keeps the source file's text except `id` and `name`;
+  without `copy_from` it starts from General. `id`: `^[a-z][a-z0-9_]{0,39}$` (422), already taken (409), unknown `copy_from` (404)
+- `DELETE /presets/{id}` → `{deleted: id, videos_switched: int}`; the file is removed and its videos switch to `general`.
+  409 for `general` and for the channel's `default_preset`; 404 for an unknown id
+- Write errors use FastAPI's list shape: `{"detail": [{loc: [path], msg}]}` (422, 404 or 409)
 
 ## Imports and videos
 
@@ -320,8 +337,15 @@ Rule ids: `canonical_spelling`, `hashtag_count`, `ambiguous_names`, `claim_needs
 ```
 LibraryItem = {id, video_id: str|null, title, subject, topic, angle, hook, url, playlist,
                published_at: str|null,            // a date "YYYY-MM-DD" or an ISO timestamp
-               from_app: bool}                    // created by "Mark as published" (video_id set)
+               from_app: bool,                    // created by "Mark as published" (video_id set)
+               // Phase 3, imported from the channel:
+               youtube_id: str|null, kind: "long"|"short", duration_s: float|null, views: int|null,
+               read_by: ""|"playlist"|"repeated"|"you",   // how topic/subject/angle were filled; "" = not read
+               source: "you"|"app"|"youtube"}             // typed in, "Mark as published", or imported
 ```
+
+Adding an entry, or editing its subject, topic or angle, sets `read_by` to `"you"`; an import never
+overwrites those three fields after that.
 
 - `GET /library` → `[LibraryItem]`, newest `published_at` first.
 - `POST /library` body `{title, subject?, topic?, angle?, hook?, url?, playlist?, published_at?}` → 201
@@ -333,10 +357,52 @@ LibraryItem = {id, video_id: str|null, title, subject, topic, angle, hook, url, 
   topic's playlist). The video's `display_status` becomes `published`. 422 for a missing or bad link.
 - `DELETE /videos/{id}/publish` → `Video`: clears the link and date and removes the entry publishing created.
 
+### Import from the channel (Phase 3)
+
+- `GET /library/import` → `{can_import: bool, key_set: bool, handle: str, running: Job|null, last_job: Job|null, last: ChannelSync|null}`
+- `POST /library/import` → 202 `Job` (kind `channel_import`, `video_id: null`; the running one if any). 422 without
+  `YOUTUBE_API_KEY` or without `handle` in `channel.yaml`. Poll `GET /jobs/{id}` or `GET /library/import`.
+- `POST /library/playlists` body `{ids: [playlist id]}` → `{added: [{topic, name, url}], last: ChannelSync}`. Appends
+  the named playlists of the last import to `channel.yaml` (topic and name = the playlist's title), keeping every
+  other line of the file; a playlist already there is skipped. 404 for an id the last import did not find.
+
+```
+ChannelSync = {at, channel: {id, title, handle, subscribers: int|null, video_count},
+               uploads, new, updated, linked,     // linked = typed-in entries matched by their link
+               long, shorts, unread,              // unread = long titles the reader could not read
+               shorts_unsure, units,              // Shorts checks that did not answer; quota units spent
+               playlists: [{id, title, count, url, in_config: {topic, name}|null}]}
+```
+
 Past uploads feed the package's end-screen target and the `cannibalization` check (a video's own entry is
-never counted against it). They only change code-built parts, so `GET /videos/{id}/packages` refreshes
+never counted against it, and neither is a Short). They only change code-built parts, so `GET /videos/{id}/packages` refreshes
 `end_screen_target`, the checklist's end-screen line and the rules for free when past uploads change; the
 package is not marked stale. Publishing does not make a package stale either.
+
+## Competitor research (Phase 3, BUILD_SPEC 7.7)
+
+- `GET /videos/{id}/competitors` → `{video_id, query, can_search: bool, can_read: bool, running: bool, fresh: bool, result: CompetitorResult|null}`
+  - `query` is the preset's `competitor_query` filled in; `fresh` = today's search (under 24 h) is for this query
+- `POST /videos/{id}/competitors` body `{read_again?: bool}` → 202 `Job` (kind `competitors`). Searches unless
+  today's search exists, then reads with Claude when the search has no read yet or `read_again` is set.
+  409 without `YOUTUBE_API_KEY` and no fresh search, for `read_again` without `ANTHROPIC_API_KEY`, or while one runs.
+
+```
+CompetitorResult = {query, searched_at, units,           // quota units the search spent
+                    rows: [CompetitorVideo], metrics: CompetitorMetrics,
+                    read: CompetitorRead|null, read_for: searched_at the read belongs to, read_at, read_usage, read_model}
+CompetitorVideo = {id, title, channel, channel_id, published_at, views, duration_s, subs: int|null,
+                   channel_views, channel_videos, url, thumbnail,
+                   age_days, views_per_day, outlier: float|null,   // views / the channel's average per video
+                   own: bool}                                      // your channel (from the last channel import)
+CompetitorMetrics = {videos, views, hhi: float|null, concentration: "spread"|"moderate"|"concentrated"|null,
+                     small_share, small_videos, recent_30d, median_per_day,
+                     leader: {id, channel, share}|null, breakouts: [video id]}   // over the first 15 others' videos
+CompetitorRead = {patterns: [{pattern, count, examples: [video id]}], angles_taken: [{angle, count}],
+                  thumbnail_words: [{word, count}], thumbnail_look,
+                  unclaimed: [{angle, why, backed_by, blocked_by: [claim rule id]}],   // blocked_by: facts do not back it
+                  read}
+```
 
 ## Thumbnails (BUILD_SPEC 7.13)
 

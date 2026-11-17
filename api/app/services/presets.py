@@ -147,6 +147,8 @@ class Preset(_Strict):
     search_fit: str = ""        # which generic search phrases describe this kind of video, for the writer
     fallback_hashtags: list[str] = []
     playlist_name: str = "{topic}"
+    # Competitor research (7.7): the YouTube search that finds videos like this one ({topic}, {subject}).
+    competitor_query: str = "{topic} {subject}"
     # Credit lines, e.g. "Boss: {real_name} ({epithet})". A line whose first variable is empty is left out.
     credit_lines: list[str] = []
 
@@ -188,6 +190,10 @@ class Preset(_Strict):
             for name in _VARIABLE.findall(seed):
                 if name not in ("topic", "name"):
                     problems.append(f"search seed `{seed}` uses `{{{name}}}`; only {{topic}} and {{name}} are allowed")
+
+        for name in _VARIABLE.findall(self.competitor_query):
+            if name not in ("topic", "subject"):
+                problems.append(f"competitor_query uses `{{{name}}}`; only {{topic}} and {{subject}} are allowed")
 
         # Hooks may only use facts, so a hook can never carry model-written text.
         for hook in self.hooks:

@@ -23,6 +23,7 @@ import {
 import { useVideoUpdates } from "@/lib/sse";
 import type { Job, Research, Video } from "@/lib/types";
 
+import { Competitors } from "./Competitors";
 import { FieldRow, SourceChip } from "./FieldRow";
 
 const MAX_PASTE = 20000;
@@ -404,6 +405,7 @@ export function ResearchPage({ id }: { id: string }) {
                   </section>
                   {r.fields.length ? <PastePanel research={r} videoId={id} running={running} /> : null}
                   <Sources research={r} />
+                  <Competitors video={v} />
                 </>
               )}
             </>

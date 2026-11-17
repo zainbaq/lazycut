@@ -58,6 +58,40 @@ class RuleContext:
     link_refs: list[str] = field(default_factory=list)
 
 
+def _within(hay: str, needle: str) -> bool:
+    """Whole-word containment of name keys ("byakue" in "onimusha way of the sword byakue")."""
+    return bool(hay) and bool(needle) and f" {needle} " in f" {hay} "
+
+
+def subject_names(ctx: "RuleContext") -> set[str]:
+    """The subject's names as keys: as typed, the canonical name, its comma parts, the real name, nicknames."""
+    raw = [ctx.subject, *(str(ctx.research.get(k) or "") for k in ("canonical_name", "real_name"))]
+    raw += str(ctx.research.get("nicknames") or "").split(",")
+    names = set()
+    for name in raw:
+        names.add(name_key(name))
+        names.update(name_key(part) for part in name.split(",")[:1])  # "Zhuo Bi, the Gatekeeper" -> "Zhuo Bi"
+    return {n for n in names if len(n) >= 3}
+
+
+def repeats(ctx: "RuleContext") -> list[dict]:
+    """Past uploads (Shorts excluded upstream) about the same subject in the same game (7.7)."""
+    names = subject_names(ctx)
+    topic = name_key(ctx.topic)
+    out = []
+    for p in ctx.past_subjects:
+        past_topic = name_key(p.get("topic") or "")
+        title = name_key(p.get("title") or "")
+        # A past upload with no game recorded may be the same game: it still counts.
+        same_game = not topic or not past_topic or _within(past_topic, topic) or _within(topic, past_topic)
+        if not same_game:
+            continue
+        past_subject = name_key(p.get("subject") or "")
+        if any(n == past_subject or _within(past_subject, n) or _within(title, n) for n in names):
+            out.append(p)
+    return out
+
+
 def _result(rule_id: str, severity: str, field_name: str, message: str, evidence: Any = None,
             fixed: bool = False) -> dict:
     return {
@@ -272,9 +306,7 @@ def _later_checks(fields: dict, ctx: RuleContext, results: list[dict]) -> None:
     results.append(_result("tags_count", "pass" if abs(count - target) <= TAGS_TOLERANCE else "warn", "tags",
                            f"{count} tags (target {target})"))
 
-    subject_key = name_key(ctx.subject)
-    matches = [p for p in ctx.past_subjects if subject_key and (
-        name_key(p.get("subject") or "") == subject_key or subject_key in name_key(p.get("title") or ""))]
+    matches = repeats(ctx)
     if not ctx.past_subjects:
         results.append(_result("cannibalization", "pass", "title", "No past uploads recorded"))
     elif matches:

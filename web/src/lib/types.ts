@@ -34,6 +34,92 @@ export interface Preset {
   [key: string]: unknown;
 }
 
+// ---- Preset editor (5): the whole preset as the API reads and writes it ----
+
+export type ConditionOp = "eq" | "ne" | "gt" | "gte" | "lt" | "lte" | "between" | "in";
+export type ConditionValue = string | number | boolean | null | (string | number)[];
+
+export interface Condition {
+  fact: string | null;
+  research: string | null;
+  op: ConditionOp;
+  value: ConditionValue;
+}
+
+export interface ResearchFieldDef {
+  key: string;
+  label: string | null;
+  type: "text" | "bool";
+  needs_credible_source: boolean;
+  hint: string | null;
+}
+
+export interface HookDef {
+  id: string;
+  text: string;
+  thumbnail_word: string | null;
+  thumbnail_text_style: string | null;
+  when: Condition;
+}
+
+export interface ClaimRuleDef {
+  id: string;
+  phrases: string[];
+  requires: Condition;
+  severity: "block" | "warn";
+  suggest: string | null;
+}
+
+export interface BannedTagDef {
+  tag: string;
+  unless: Condition | null;
+}
+
+export interface PresetDoc {
+  id: string;
+  name: string;
+  description: string;
+  event_types: EventType[];
+  facts: FactDef[];
+  research_fields: ResearchFieldDef[];
+  credit_fields: string[];
+  credit_lines: string[];
+  hooks: HookDef[];
+  thumbnail_words: string[];
+  title_patterns: { recommended: string; alternates: string[] };
+  claim_rules: ClaimRuleDef[];
+  clip_rules: { lead_in_s: number; tail_s: number; end_on: string[]; start_cue: string | null; end_cue: string | null };
+  saved_prompts: string[];
+  tag_recipe: string[];
+  banned_tags: (string | BannedTagDef)[];
+  slots: Record<string, string>;
+  templates: { description: string | null; shorts_description: string | null; reel: string | null; reel_end_text: string | null };
+  search_seeds: string[];
+  search_fit: string;
+  fallback_hashtags: string[];
+  playlist_name: string;
+  competitor_query: string;
+  /** Read-only, added by the API. */
+  file?: string | null;
+  video_count?: number;
+}
+
+export interface PresetProblem {
+  path: string;
+  message: string;
+}
+
+export interface PresetCheck {
+  ok: boolean;
+  problems: PresetProblem[];
+}
+
+export interface NewPreset {
+  id: string;
+  name: string;
+  copy_from: string | null;
+}
+
 export interface ConfigError {
   file: string;
   problem: string;
@@ -452,6 +538,46 @@ export interface LibraryItem {
   published_at: string | null;
   /** Created by "Mark as published" (video_id is set). */
   from_app: boolean;
+  /** Phase 3: imported from the channel. */
+  youtube_id: string | null;
+  kind: "long" | "short";
+  duration_s: number | null;
+  views: number | null;
+  /** How topic and subject were filled: read from the title ("playlist" | "repeated"), by you ("you"), or "" (not read). */
+  read_by: "" | "playlist" | "repeated" | "you";
+  source: "you" | "app" | "youtube";
+}
+
+export interface ChannelPlaylistRow {
+  id: string;
+  title: string;
+  count: number;
+  url: string;
+  in_config: { topic: string; name: string } | null;
+}
+
+export interface ChannelSync {
+  at: string;
+  channel: { id: string; title: string; handle: string; subscribers: number | null; video_count: number };
+  uploads: number;
+  new: number;
+  updated: number;
+  linked: number;
+  long: number;
+  shorts: number;
+  unread: number;
+  shorts_unsure: number;
+  units: number;
+  playlists: ChannelPlaylistRow[];
+}
+
+export interface ImportStatus {
+  can_import: boolean;
+  key_set: boolean;
+  handle: string;
+  running: Job | null;
+  last_job: Job | null;
+  last: ChannelSync | null;
 }
 
 /** `POST /library` (title required) and `PATCH /library/{id}` (any field). */
@@ -763,3 +889,67 @@ export type ShortPackage = Omit<Package, "fields" | "platform" | "clip_id"> & {
   clip_id: string;
   fields: ShortFields;
 };
+
+// ---- Competitor research (BUILD_SPEC 7.7, Phase 3) ----
+
+export interface CompetitorVideo {
+  id: string;
+  title: string;
+  channel: string;
+  channel_id: string;
+  published_at: string;
+  views: number;
+  duration_s: number;
+  subs: number | null;
+  url: string;
+  thumbnail: string;
+  age_days: number;
+  views_per_day: number;
+  /** Views against the channel's average per video. */
+  outlier: number | null;
+  own: boolean;
+}
+
+export interface CompetitorMetrics {
+  videos: number;
+  views: number;
+  /** Herfindahl index of view shares over the first page (0..1). */
+  hhi: number | null;
+  concentration: "spread" | "moderate" | "concentrated" | null;
+  small_share: number | null;
+  small_videos?: number;
+  recent_30d: number;
+  median_per_day: number | null;
+  leader: { id: string; channel: string; share: number } | null;
+  breakouts: string[];
+}
+
+export interface CompetitorReadOut {
+  patterns: { pattern: string; count: number; examples: string[] }[];
+  angles_taken: { angle: string; count: number }[];
+  thumbnail_words: { word: string; count: number }[];
+  thumbnail_look: string;
+  unclaimed: { angle: string; why: string; backed_by: string; blocked_by: string[] }[];
+  read: string;
+}
+
+export interface CompetitorResult {
+  query: string;
+  searched_at: string;
+  units: number;
+  rows: CompetitorVideo[];
+  metrics: CompetitorMetrics;
+  read?: CompetitorReadOut | null;
+  read_for?: string;
+  read_at?: string;
+}
+
+export interface CompetitorsView {
+  video_id: string;
+  query: string;
+  can_search: boolean;
+  can_read: boolean;
+  running: boolean;
+  fresh: boolean;
+  result: CompetitorResult | null;
+}
