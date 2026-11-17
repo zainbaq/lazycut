@@ -5,15 +5,16 @@ import { useState } from "react";
 
 import { Switch } from "@/components/ui/Switch";
 import { isActive, jobOf, useEditPackage, useGeneratePackage, usePackages, useRegeneratePackage, useVideo } from "@/lib/queries";
+import { useWorkspace } from "@/lib/store";
 import type { Video } from "@/lib/types";
 
 import { PackageDrawer } from "./PackageDrawer";
 import { RuleBadges } from "./RuleBadges";
+import { SHORT_PLATFORMS, ShortSection } from "./ShortPackages";
 import { TitleDeck } from "./TitleDeck";
 
 const btn = "ink-btn flex min-h-11 items-center justify-center gap-1.5 rounded-[10px] border px-3 text-[12px] disabled:opacity-50";
 
-const SHORT_FORM = ["Shorts", "Instagram Reels", "TikTok"];
 
 /** Platforms, Generate, the title deck, rule badges and the stale state (9.4 region 7, Phase 1 long-form flow). */
 export function PackageSection({ video }: { video: Video }) {
@@ -24,6 +25,9 @@ export function PackageSection({ video }: { video: Video }) {
   const regenerate = useRegeneratePackage(video.id);
   const edit = useEditPackage(video.id);
   const [youtube, setYoutube] = useState(true);
+  const clipId = useWorkspace((s) => s.selectedClipId);
+  const platforms = useWorkspace((s) => s.shortPlatforms);
+  const toggle = useWorkspace((s) => s.toggleShortPlatform);
   const [drawer, setDrawer] = useState(false);
 
   const job = jobOf(live.data ?? video, "package");
@@ -51,10 +55,17 @@ export function PackageSection({ video }: { video: Video }) {
         <Switch checked={youtube} onChange={setYoutube} label="YouTube long-form" className="w-full">
           <span className="mr-auto text-fg">YouTube long-form</span>
         </Switch>
-        {SHORT_FORM.map((name) => (
-          <Switch key={name} checked={false} onChange={() => undefined} disabled label={`${name}: comes with clips`} className="w-full">
-            <span className="mr-auto text-fg3">
-              {name} <span className="text-[11px] text-fg4">· comes with clips</span>
+        {SHORT_PLATFORMS.map((p) => (
+          <Switch
+            key={p.id}
+            checked={!!clipId && platforms[p.id]}
+            onChange={() => toggle(p.id)}
+            disabled={!clipId}
+            label={clipId ? p.label : `${p.label}: select a clip first`}
+            className="w-full"
+          >
+            <span className={`mr-auto ${clipId ? "text-fg" : "text-fg3"}`}>
+              {p.label} {clipId ? null : <span className="text-[11px] text-fg4">· select a clip</span>}
             </span>
           </Switch>
         ))}
@@ -132,6 +143,7 @@ export function PackageSection({ video }: { video: Video }) {
           {error.message}
         </span>
       ) : null}
+      <ShortSection video={live.data ?? video} />
     </div>
   );
 }

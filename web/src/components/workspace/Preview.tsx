@@ -1,16 +1,20 @@
 "use client";
 
-import { Pause, Play, SkipBack, SkipForward } from "lucide-react";
+import * as Dropdown from "@radix-ui/react-dropdown-menu";
+import { Check, ChevronDown, Pause, Play, Repeat, SkipBack, SkipForward } from "lucide-react";
 import { motion } from "motion/react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
+import { lengthText, type Range } from "@/components/clips/trim";
+import type { ClipActions } from "@/components/clips/useClipActions";
 import { Switch } from "@/components/ui/Switch";
 import { apiUrl } from "@/lib/api";
 import { clock } from "@/lib/format";
 import { crop as cropMotion, PLAYHEAD_SEEK_CSS } from "@/lib/motion";
 import { useWorkspace } from "@/lib/store";
-import type { EventType, TimelineEvent, Video } from "@/lib/types";
+import type { Clip, EventType, TimelineEvent, Video } from "@/lib/types";
 
+import { menuContent, menuItem } from "./EventActions";
 import { eventName, typeOf } from "./glyphs";
 import { eventAt, stepEvent } from "./nav";
 
@@ -74,14 +78,50 @@ function Scrubber({ duration }: { duration: number }) {
   );
 }
 
-function HeadLabel({ events, types }: { events: TimelineEvent[]; types: Map<string, EventType> }) {
+/** The chip on the stage: the clip's edge when the playhead sits on one, else the event under it. */
+function HeadLabel({ events, types, clip }: { events: TimelineEvent[]; types: Map<string, EventType>; clip: Range | undefined }) {
   const playhead = useWorkspace((s) => s.playhead);
   const e = eventAt(events, playhead);
-  if (!e) return null;
+  let text = e ? eventName(e, typeOf(types, e.type)) : null;
+  if (clip && Math.abs(playhead - clip.t_start) < 0.12) text = "Clip start";
+  else if (clip && Math.abs(playhead - clip.t_end) < 0.12) text = "Clip end";
+  if (!text) return null;
   return (
     <span className="pointer-events-none absolute bottom-3.5 left-1/2 max-w-[80%] -translate-x-1/2 truncate whitespace-nowrap rounded border border-accent bg-[rgba(7,7,7,0.8)] px-2.5 py-1 text-fg">
-      {eventName(e, typeOf(types, e.type))}
+      {text}
     </span>
+  );
+}
+
+/** The clip name with a menu to switch clips or go back to the whole video (9.4 region 4). */
+function ClipSwitch({ video, clips, selected, actions }: { video: Video; clips: Clip[]; selected: Clip | undefined; actions: ClipActions }) {
+  if (!clips.length) return <span className="truncate text-[13px] font-semibold">{video.title}</span>;
+  return (
+    <Dropdown.Root>
+      <Dropdown.Trigger className="ink-btn -ml-2 flex min-h-11 min-w-0 items-center gap-1.5 rounded-[10px] px-2 text-left text-[13px] font-semibold text-fg">
+        <span className="truncate">{selected ? `${video.subject || video.title} · ${selected.name}` : video.title}</span>
+        <ChevronDown aria-hidden="true" size={14} className="shrink-0 text-fg3" />
+      </Dropdown.Trigger>
+      <Dropdown.Portal>
+        <Dropdown.Content align="start" sideOffset={4} className={menuContent}>
+          <Dropdown.Item className={menuItem} onSelect={() => actions.select(null)}>
+            <Check aria-hidden="true" size={14} className={selected ? "opacity-0" : "text-ok"} />
+            Whole video
+          </Dropdown.Item>
+          <Dropdown.Separator className="my-1 h-px bg-line2" />
+          {clips.map((c, i) => (
+            <Dropdown.Item key={c.id} className={menuItem} onSelect={() => actions.select(c.id)}>
+              <Check aria-hidden="true" size={14} className={c.id === selected?.id ? "text-ok" : "opacity-0"} />
+              <span className="max-w-[220px] truncate">{c.name}</span>
+              <span className="tnum ml-auto pl-3 text-[11px] text-fg4">
+                {lengthText(c.duration_s)}
+                {i < 9 ? ` · ${i + 1}` : ""}
+              </span>
+            </Dropdown.Item>
+          ))}
+        </Dropdown.Content>
+      </Dropdown.Portal>
+    </Dropdown.Root>
   );
 }
 
@@ -95,10 +135,14 @@ export function Preview({
   video,
   events,
   types,
+  clips,
+  clipActions,
 }: {
   video: Video;
   events: TimelineEvent[];
   types: Map<string, EventType>;
+  clips: Clip[];
+  clipActions: ClipActions;
 }) {
   const ref = useRef<HTMLVideoElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -115,6 +159,15 @@ export function Preview({
   const [mediaError, setMediaError] = useState<string | null>(null);
 
   const duration = video.duration_s ?? 0;
+  const selectedClipId = useWorkspace((s) => s.selectedClipId);
+  const clipDraft = useWorkspace((s) => s.clipDraft);
+  const clip = selectedClipId ? clips.find((c) => c.id === selectedClipId) : undefined;
+  const clipRange: Range | undefined = clip ? (clipDraft && clipDraft.id === clip.id ? clipDraft : clip) : undefined;
+  // The frame loop reads the range from a ref, so dragging an edge does not restart it.
+  const loop = useRef<Range | undefined>(undefined);
+  useEffect(() => {
+    loop.current = clipRange;
+  });
 
   useEffect(() => {
     setVideoEl(ref.current);
@@ -125,9 +178,16 @@ export function Preview({
   useEffect(() => {
     if (!playing) return;
     let raf = 0;
+    let last = ref.current?.currentTime ?? 0;
     const tick = () => {
       const el = ref.current;
-      if (el) setPlayhead(el.currentTime);
+      if (el) {
+        // Playback that runs into the end of the selected clip starts it again (9.4).
+        const range = loop.current;
+        if (range && last < range.t_end && el.currentTime >= range.t_end) el.currentTime = range.t_start;
+        last = el.currentTime;
+        setPlayhead(el.currentTime);
+      }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
@@ -157,7 +217,7 @@ export function Preview({
   return (
     <section aria-label="Preview" className="flex min-w-0 flex-[999_1_380px] flex-col gap-2.5 p-4">
       <div className="flex items-center justify-between gap-3">
-        <span className="truncate text-[13px] font-semibold">{video.title}</span>
+        <ClipSwitch video={video} clips={clips} selected={clip} actions={clipActions} />
         <Switch checked={crop916} onChange={setCrop916}>
           9:16 crop
         </Switch>
@@ -177,6 +237,15 @@ export function Preview({
           onSeeked={() => {
             if (ref.current && ref.current.paused) setPlayhead(ref.current.currentTime);
           }}
+          onEnded={() => {
+            // A clip that runs to the very end of the video loops from here.
+            const range = loop.current;
+            const el = ref.current;
+            if (range && el && range.t_end >= el.duration - 0.25) {
+              el.currentTime = range.t_start;
+              void el.play().catch(() => undefined);
+            }
+          }}
           onLoadedData={() => setMediaError(null)}
           onError={() => setMediaError("The video could not be loaded from the API.")}
           onClick={togglePlay}
@@ -194,7 +263,7 @@ export function Preview({
           transition={cropMotion}
         />
         <div aria-hidden="true" className="pointer-events-none absolute bottom-0 left-1/2 top-0 border-l border-dashed border-[rgba(240,106,80,0.7)]" />
-        <HeadLabel events={events} types={types} />
+        <HeadLabel events={events} types={types} clip={clipRange} />
         {mediaError ? (
           <span role="alert" className="absolute inset-x-4 top-4 rounded-[10px] border border-accent bg-surface p-2.5 text-fg">
             {mediaError}
@@ -219,7 +288,15 @@ export function Preview({
             <SkipForward aria-hidden="true" size={16} fill="currentColor" />
           </button>
         </div>
-        <span className="tnum text-fg3">{clock(duration)}</span>
+        <span className="tnum flex items-center gap-1.5 text-fg3">
+          {clipRange ? (
+            <span className="flex items-center text-accentsoft" title="Playback loops the selected clip">
+              <Repeat aria-hidden="true" size={12} />
+              <span className="sr-only">Looping the clip</span>
+            </span>
+          ) : null}
+          {clock(duration)}
+        </span>
       </div>
       <Scrubber duration={duration} />
     </section>

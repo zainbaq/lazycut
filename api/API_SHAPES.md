@@ -1,4 +1,4 @@
-# API shapes (Phase 1)
+# API shapes (Phases 1 and 2)
 
 The JSON the web app relies on. `BUILD_SPEC.md` section 8 lists the endpoints; this file fixes
 their payloads. All times are float seconds. Errors are `{"detail": "message"}` with a 4xx/5xx code.
@@ -34,7 +34,7 @@ Video = {
   jobs: [Job],                                               // latest job of each kind
   media_url: "/videos/{id}/media"
 }
-Job = {id, video_id, kind: "import"|"analysis"|"research"|"package", status: "queued"|"running"|"done"|"error",
+Job = {id, video_id, kind: "import"|"analysis"|"research"|"package"|"clip_find"|"clip_export"|"clip_package"|"clip_refine"|"thumbnail"|"thumbnail_frames", status: "queued"|"running"|"done"|"error",
        progress: 0..1, message: str|null, error: str|null, created_at, updated_at}
 ```
 
@@ -165,10 +165,10 @@ Source = {url, title, domain, rating: "credible"|"unrated"}
   missing_facts: [label],          // required facts not confirmed yet; generation is blocked until empty
   can_generate: bool,
   running: bool,                   // a package job is queued or running
-  packages: [Package]              // today at most one: platform "youtube"
+  packages: [Package]              // the long-form one (platform "youtube"), then each clip's short-form ones
 }
 Package = {
-  id, video_id, clip_id: null, platform: "youtube", version: int, created_at,
+  id, video_id, clip_id: null, platform: "youtube", version: int, created_at,   // short-form: see "Short-form packages"
   fields: PackageFields, edited_fields: [field name], rule_results: [RuleResult],
   inputs_hash, stale: bool,        // facts, research, events, preset or channel changed since generation
   blocked_fields: [field path],    // fields with a block: disable Copy for them
@@ -214,8 +214,8 @@ Rule ids: `canonical_spelling`, `hashtag_count`, `banned_tags`, `tags_fit`, `amb
 `thumbnail.word_options[0]`, `description`, `tags`.
 
 - `POST /videos/{id}/packages` body `{platforms: ["youtube"]}` → 202 `Job` (kind `package`). 409 with no
-  Anthropic key, with unconfirmed required facts (the message names them), or while one runs. 422 for
-  other platforms (short-form comes with clips in Phase 2). One Claude call per run.
+  Anthropic key, with unconfirmed required facts (the message names them), or while one runs. Short-form
+  platforms need a `clip_id` (see "Short-form packages"). One Claude call per run.
 - `PATCH /packages/{id}` body `{field, value}` edits one of `title, description, hook_line, tags, hashtags,
   pinned_comment, community_post, opening_5s, chapters` (tags/hashtags take a list, or a comma/space-separated
   string; chapters take "m:ss Label" lines) → `Package`; the field joins `edited_fields` and the rules re-run.
@@ -229,6 +229,91 @@ Rule ids: `canonical_spelling`, `hashtag_count`, `banned_tags`, `tags_fit`, `amb
 - `GET /videos/{id}/export.md` → the package as Markdown, as a download named
   `{Channel}_{Topic}_{Subject}_YouTube_SEO.md` (letters, digits, `_` and `-` only). It includes a
   "Search demand" section. 404 before generation.
+
+## Clips (Phase 2; BUILD_SPEC 7.5, 7.6)
+
+A clip is one continuous range of a video. `GET /videos/{id}/clips` →
+
+```
+{
+  can_find: bool,                    // an Anthropic key is set; without one the finder reads the timeline alone
+  can_refine: bool,                  // a Gemini key is set
+  finding: bool,                     // a clip_find job is queued or running
+  limits: {min_s: 3.0, max_s: {shorts: 180, reels: 180, tiktok: 600}},
+  clips: [Clip]                      // in time order
+}
+Clip = {
+  id, video_id, name, t_start, t_end, duration_s,
+  status: "candidate"|"selected"|"exported",     // candidate = a finder proposal nobody touched
+  source: "finder"|"user"|"import", platform: "shorts"|"reels"|"tiktok"|null,
+  prompt: str|null, reason: str|null,              // what was asked, and the finder's one-line reason
+  payoff_t: float|null,              // the finder's or the user's; else the default for the current range
+  frame_t: float,                    // the frame for the card: the payoff, or the middle
+  orig_start, orig_end,              // the range it was created with; `edited` says whether it differs
+  edited: bool,
+  event_counts: {type: int},         // visible events that start inside the range, measured on every read
+  dead_time_s: float, dead_runs: [{t_start, t_end}],
+  crop_warning: bool,                // an event inside is marked unsafe for a 9:16 crop
+  over_limit_s: float,               // how far over its platform's maximum (0 when it fits)
+  note: null | {id: "too_long"|"late_start"|"dead_time"|"late_payoff"|"long_tail"|"crop"|"no_events",
+                message, apply: null | {t_start?: float, t_end?: float}, at: null | [float, float]},
+  exports: [ClipExport],             // newest first
+  created_at
+}
+ClipExport = {id, clip_id, crop: "none"|"9x16", mode: "accurate"|"lossless", width, height, fps,
+              t_start, t_end,        // the range asked for (compare with the clip to see whether it was trimmed since)
+              real_start, real_end,  // what the file holds: a lossless cut starts on a keyframe
+              duration_s, size_bytes, created_at, url: "/exports/{id}/download"}
+```
+
+- `POST /videos/{id}/clips` body `{t_start, t_end, name?, platform?}` → 201 `Clip` (`source: "user"`, `status:
+  "selected"`). 422 outside the video or under 3 s; 409 before the import has finished.
+- `PATCH /clips/{id}` body any of `{t_start, t_end, name, status: "candidate"|"selected", platform, payoff_t}`, or
+  `{reset: true}` (back to `orig_start`, `orig_end`) → `Clip`. Moving an edge or renaming makes a candidate
+  `selected`. To apply the analysis note, send its `apply` object. 422 for a range outside the video or under 3 s,
+  an empty name, a payoff outside the clip.
+- `DELETE /clips/{id}` → 204. Its exports (rows and files) and its packages go with it.
+- `POST /videos/{id}/clips/find` body `{prompt?, platform: "shorts"|"reels"|"tiktok" (default "reels"),
+  target_len_s?: 3..600}` → 202 `Job` (kind `clip_find`). One Claude text call on the stored timeline; with no
+  Anthropic key, three proposals from the timeline alone. Candidates of earlier runs are replaced; kept clips stay.
+  The finished job's `message` reads like "4 clips found. <the model's note>". 409 while importing, while one
+  runs, or when the video has no visible events.
+- `POST /clips/{id}/export` body `{crop: "none"|"9x16", mode: "accurate"|"lossless"}` → 202 `Job` (kind
+  `clip_export`, with progress). 422 for lossless with a crop; 409 when the source file is missing or an export is
+  running. The clip becomes `exported`; an export of the same crop and mode replaces the earlier file.
+- `GET /exports/{id}/download` → the MP4, named `{Channel}_{Topic}_{Subject}_{Clip}_9x16.mp4` (or `_full`,
+  `_full_lossless`). 404 once it was replaced or its clip deleted.
+- `POST /clips/{id}/refine` → 202 `Job` (kind `clip_refine`): two small Gemini calls look at the clip's first and
+  closing event and move the edges by at most 2 s. The `message` says what happened to each edge. 409 with no
+  Gemini key, no source file, no events in the clip, or while one runs.
+
+## Short-form packages (Phase 2; BUILD_SPEC 7.8)
+
+`GET /videos/{id}/packages` also lists each clip's packages and adds `running_short: bool` (a `clip_package` job
+is queued or running). A short-form `Package` has `clip_id` set, `platform: "shorts"|"reels"|"tiktok"`, and is
+`stale` when its clip was trimmed or the long-form inputs changed. Its fields:
+
+```
+ShortFields = {
+  clip: {id, name, t_start, t_end},
+  title, description,                  // Shorts only
+  on_screen_text, caption, question, end_text,   // Reels and TikTok only; caption is ready to paste, hashtags included
+  hashtags: [str], pinned_comment, link_back: str, hook_id: str|null,
+  slots: {name: text}, goals: {field: Goal}, safe_margins: {top_pct, bottom_pct}
+}
+```
+Rule ids: `canonical_spelling`, `hashtag_count`, `ambiguous_names`, `claim_needs_fact.<id>`, `number_needs_fact`,
+`link_back` (block; warn on TikTok; field `description` or `caption`), `length_limits`, `clip_length` (field `clip`).
+
+- `POST /videos/{id}/packages` body `{platforms: ["shorts", "reels", "tiktok"], clip_id}` → 202 `Job` (kind
+  `clip_package`): one Claude call writes every platform listed. 422 without `clip_id`, 404 for a clip of another
+  video, 409 with no Anthropic key, unconfirmed required facts, or while one runs. Without `clip_id` the endpoint
+  writes the YouTube long-form package as before.
+- `PATCH /packages/{id}` edits `title, description, hashtags, pinned_comment` (Shorts) or `on_screen_text, caption,
+  end_text, hashtags, pinned_comment` (Reels, TikTok); editing the hashtags rewrites their line inside the
+  description or caption. Dismissals work as for long-form.
+- `POST /packages/{id}/regenerate` body `{field}` or `{all: true, replace_edits}` rewrites that platform of that clip.
+- `GET /videos/{id}/export.md` appends each clip's short-form packages after the long-form package.
 
 ## Past uploads and publishing (Phase 1 step 7)
 
@@ -304,7 +389,9 @@ ThumbSettings = {model, text_mode, review, text_corner: "auto"|corner, font, asp
   409 when no Gemini key is set, the import is not finished, or an analysis is already running.
   Kept unless `discard_user_work`: user events, verified, hidden or edited (moved, retyped,
   relabelled) events, confirmed facts.
-- `GET /jobs/{id}` → `Job`; `POST /jobs/{id}/retry` → 202 `Job` (a new job of the same kind)
+- `GET /jobs/{id}` → `Job`; `POST /jobs/{id}/retry` → 202 `Job` (a new job of the same kind). 409 for the clip
+  jobs (`clip_find`, `clip_export`, `clip_package`, `clip_refine`): they need what they were started with, so
+  start them again from the clip.
 
 ## Live updates
 
@@ -316,6 +403,7 @@ ThumbSettings = {model, text_mode, review, text_corner: "auto"|corner, font, asp
 | `job.done` | `Job` |
 | `job.error` | `Job` |
 | `analysis.event` | `Event`, one per event in time order after an analysis is stored |
+| `clip.candidate` | `Clip`, one per finder proposal as it is stored (the untouched proposals of earlier runs are gone by then) |
 | `thumbnail.updated` | `Thumbnail`, whenever one changes |
 | `thumbnail.frames` | the frame finder's result, as in `GET /videos/{id}/thumbnails` `frames` |
 

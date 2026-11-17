@@ -5,7 +5,7 @@ import { useEffect, useRef } from "react";
 
 import { apiUrl } from "./api";
 import { keys, mergeJob } from "./queries";
-import type { FrameFinds, Job, PackageList, Research, Thumbnail, ThumbnailState, Timeline, TimelineEvent, Video } from "./types";
+import type { Clip, ClipList, FrameFinds, Job, PackageList, Research, Thumbnail, ThumbnailState, Timeline, TimelineEvent, Video } from "./types";
 
 /** Model events the server replaces on re-analysis (7.12), unless the user chose to discard everything. */
 export function replaceable(e: TimelineEvent): boolean {
@@ -28,6 +28,7 @@ export function replaceable(e: TimelineEvent): boolean {
 export function useVideoUpdates(videoId: string, ready: boolean) {
   const qc = useQueryClient();
   const batchOpen = useRef(false);
+  const clipBatchOpen = useRef(false);
 
   useEffect(() => {
     if (!ready) return;
@@ -40,8 +41,15 @@ export function useVideoUpdates(videoId: string, ready: boolean) {
       if (job.kind === "analysis" && (job.status === "queued" || job.status === "running")) {
         batchOpen.current = false;
       }
+      if (job.kind === "clip_find" && (job.status === "queued" || job.status === "running")) {
+        clipBatchOpen.current = false;
+        qc.setQueryData<ClipList>(keys.clips(videoId), (c) => (c && !c.finding ? { ...c, finding: true } : c));
+      }
       if (job.kind === "research" && (job.status === "queued" || job.status === "running")) {
         qc.setQueryData<Research>(keys.research(videoId), (r) => (r && !r.running ? { ...r, running: true } : r));
+      }
+      if (job.kind === "clip_package" && (job.status === "queued" || job.status === "running")) {
+        qc.setQueryData<PackageList>(keys.packages(videoId), (p) => (p && !p.running_short ? { ...p, running_short: true } : p));
       }
       if (job.kind === "package" && (job.status === "queued" || job.status === "running")) {
         qc.setQueryData<PackageList>(keys.packages(videoId), (p) => (p && !p.running ? { ...p, running: true } : p));
@@ -63,9 +71,27 @@ export function useVideoUpdates(videoId: string, ready: boolean) {
       if (job.kind === "research" || job.kind === "import") void qc.invalidateQueries({ queryKey: keys.research(videoId) });
       // A new package, or new facts, events or research that make the current one stale.
       void qc.invalidateQueries({ queryKey: keys.packages(videoId) });
-      if (job.kind === "thumbnail" || job.kind === "thumbnail_frames" || job.kind === "package") {
+      // Clips are measured against the events, and clip jobs add or change them.
+      if (job.kind === "analysis" || job.kind === "import" || job.kind.startsWith("clip")) {
+        void qc.invalidateQueries({ queryKey: keys.clips(videoId) });
+      }
+      if (job.kind === "thumbnail"|| job.kind === "thumbnail_frames" || job.kind === "package") {
         void qc.invalidateQueries({ queryKey: keys.thumbnails(videoId) });
       }
+    };
+    const onClip = (e: MessageEvent<string>) => {
+      const clip = JSON.parse(e.data) as Clip;
+      qc.setQueryData<ClipList>(keys.clips(videoId), (list) => {
+        if (!list) return list;
+        let clips = list.clips;
+        if (!clipBatchOpen.current) {
+          // The server has just replaced the proposals nobody touched; drop ours so they do not linger.
+          clipBatchOpen.current = true;
+          clips = clips.filter((c) => !(c.status === "candidate" && c.source === "finder"));
+        }
+        clips = [...clips.filter((c) => c.id !== clip.id), clip].sort((a, b) => a.t_start - b.t_start);
+        return { ...list, clips };
+      });
     };
     const onThumb = (e: MessageEvent<string>) => {
       const row = JSON.parse(e.data) as Thumbnail;
@@ -98,6 +124,7 @@ export function useVideoUpdates(videoId: string, ready: boolean) {
     source.addEventListener("job.done", onFinished as EventListener);
     source.addEventListener("job.error", onFinished as EventListener);
     source.addEventListener("analysis.event", onEvent as EventListener);
+    source.addEventListener("clip.candidate", onClip as EventListener);
     source.addEventListener("thumbnail.updated", onThumb as EventListener);
     source.addEventListener("thumbnail.frames", onFrames as EventListener);
     source.onerror = () => {
@@ -112,6 +139,7 @@ export function useVideoUpdates(videoId: string, ready: boolean) {
         void qc.invalidateQueries({ queryKey: keys.research(videoId) });
         void qc.invalidateQueries({ queryKey: keys.packages(videoId) });
         void qc.invalidateQueries({ queryKey: keys.thumbnails(videoId) });
+        void qc.invalidateQueries({ queryKey: keys.clips(videoId) });
       }
     };
     return () => source.close();

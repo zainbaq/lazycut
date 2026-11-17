@@ -18,7 +18,18 @@ from app.services.templating import holds
 
 # YouTube long-form limits (checked 2026-11: title 100 characters, description 5,000,
 # all tags together 500 characters counting separators).
-LENGTH_LIMITS = {"youtube": {"title": 100, "description": 5000, "tags": 500, "pinned_comment": 10000}}
+LENGTH_LIMITS = {
+    "youtube": {"title": 100, "description": 5000, "tags": 500, "pinned_comment": 10000},
+    # Short-form (looked up 2026-11-16; only third-party pages were found and they disagree on the
+    # caption limits, so the lower figure is used: Reels 2,200; TikTok 2,200 of a reported 2,200-4,000).
+    "shorts": {"title": 100, "description": 5000},
+    "reels": {"caption": 2200},
+    "tiktok": {"caption": 2200},
+}
+# The text a short-form package is posted with, per platform; claims are checked in all of it.
+SHORT_TEXT = {"shorts": ("title", "description"), "reels": ("on_screen_text", "caption", "end_text"),
+              "tiktok": ("on_screen_text", "caption", "end_text")}
+FREE_TEXT = {"description", "caption", "pinned_comment"}  # numbers are not checked in running text
 TAGS_TOLERANCE = 5
 MIN_CHAPTER_S = 10.0  # YouTube: every chapter, the last one included, is at least 10 s
 
@@ -41,6 +52,10 @@ class RuleContext:
     ambiguous: set[str] = field(default_factory=set)
     fallback_hashtags: list[str] = field(default_factory=list)
     missing_playlist: str | None = None
+    # Short-form: the clip's platform maximum (duration_s is then the clip's length) and what counts
+    # as a reference back to the full video (its link, the playlist, the channel's names).
+    clip_limit_s: float | None = None
+    link_refs: list[str] = field(default_factory=list)
 
 
 def _result(rule_id: str, severity: str, field_name: str, message: str, evidence: Any = None,
@@ -214,7 +229,7 @@ def claim_and_number_results(texts: list[tuple[str, str]], ctx: RuleContext) -> 
     named = set(re.findall(r"\d+(?:\.\d+)?", f"{ctx.topic} {ctx.subject}"))
     free_words = {w.lower() for w in ctx.preset.thumbnail_words}
     for path, text in texts:
-        if path == "description" or (path.startswith("thumbnail") and text.lower() in free_words):
+        if path in FREE_TEXT or (path.startswith("thumbnail") and text.lower() in free_words):
             continue
         stray = [n for n in re.findall(r"\d+(?:\.\d+)?", text) if n not in allowed_numbers and n not in named]
         if stray:
@@ -316,6 +331,106 @@ def _search_demand(fields: dict, ctx: RuleContext, results: list[dict]) -> None:
             results.append(_result("search_demand", "warn", field_name,
                                    f"{where} miss{s} every top search for this video: {names}",
                                    [p["text"] for p in top]))
+
+
+def check_short(fields: dict, ctx: RuleContext) -> tuple[dict, list[dict]]:
+    """The rules for one short-form package (Shorts, Reels or TikTok): spelling and hashtags are
+    fixed, then claims, numbers, the link back to the full video, the lengths and the clip itself."""
+    fields = copy.deepcopy(fields)
+    results: list[dict] = []
+    channel = ctx.channel
+    texts = [name for name in SHORT_TEXT.get(ctx.platform, ()) if name in fields]
+    body = "description" if ctx.platform == "shorts" else "caption"
+    name = {"shorts": "Shorts", "reels": "Reels", "tiktok": "TikTok"}.get(ctx.platform, ctx.platform)
+
+    canonical = ctx.research.get("canonical_name")
+    words = re.findall(r"[A-Za-z0-9]+", canonical) if isinstance(canonical, str) else []
+    if words:
+        pattern = re.compile(r"(?<![\w#])" + r"[\s\-_.]*".join(map(re.escape, words)) + r"(?![\w])", re.IGNORECASE)
+        found: list[str] = []
+
+        def swap(m: re.Match) -> str:
+            if m.group(0) != canonical:
+                found.append(m.group(0))
+            return canonical
+
+        for key in texts:
+            fields[key] = pattern.sub(swap, fields.get(key) or "")
+        if found:
+            results.append(_result("canonical_spelling", "pass", texts[0], f"Spelling set to “{canonical}”",
+                                   {"from": sorted(set(found)), "to": canonical}, fixed=True))
+
+    # Hashtags: the platform's count, #Shorts where it is required, no bare ambiguous names. The
+    # line of hashtags inside the description or caption follows whatever changes here.
+    want = (channel.hashtags.get(ctx.platform) if channel else None) or 5
+    required = (channel.shorts_required_hashtag if channel else "#Shorts") if ctx.platform == "shorts" else None
+    before = list(fields.get("hashtags") or [])
+    tags: list[str] = []
+    for tag in ([required] if required else []) + before:
+        tag = "#" + re.sub(r"[^\w]", "", str(tag).lstrip("#"))
+        if len(tag) > 1 and tag.lower() not in {h.lower() for h in tags}:
+            tags.append(tag)
+    ambiguous = {n.replace(" ", "") for n in ctx.ambiguous}
+    kept: list[str] = []
+    swapped: list[str] = []
+    for tag in tags:
+        if tag[1:].lower() not in ambiguous:
+            kept.append(tag)
+            continue
+        taken = {h.lower() for h in tags + kept}
+        spare = next((f if f.startswith("#") else "#" + f for f in ctx.fallback_hashtags
+                      if (f if f.startswith("#") else "#" + f).lower() not in taken), None)
+        swapped.append(f"{tag} → {spare}" if spare else f"{tag} removed")
+        if spare:
+            kept.append(spare)
+    kept = kept[:want]
+    fields["hashtags"] = kept
+    in_text = fields.get("hashtags_text")
+    if in_text is None:
+        in_text = " ".join(before)
+    now = " ".join(kept)
+    if in_text and in_text != now and in_text in (fields.get(body) or ""):
+        fields[body] = fields[body].replace(in_text, now)
+    fields["hashtags_text"] = now
+    if swapped:
+        results.append(_result("ambiguous_names", "pass", "hashtags",
+                               f"{'; '.join(swapped)}: the bare name is mostly searched for something else",
+                               swapped, fixed=True))
+    added = bool(required) and required.lower() not in {str(t).lower() for t in before}
+    if len(kept) < want:
+        results.append(_result("hashtag_count", "warn", "hashtags", f"{len(kept)} hashtags; the channel uses {want} on {name}"))
+    else:
+        results.append(_result("hashtag_count", "pass", "hashtags",
+                               f"{want} hashtags" + (f", {required} added" if added else ""), fixed=kept != before))
+
+    results += claim_and_number_results(
+        [(key, fields.get(key) or "") for key in texts] + [("pinned_comment", fields.get("pinned_comment") or "")], ctx)
+
+    text = (fields.get(body) or "").lower()
+    refs = [r for r in ctx.link_refs if r and r.lower() in text]
+    if refs:
+        results.append(_result("link_back", "pass", body, f"Points back to the full video ({refs[0]})"))
+    else:
+        why = (f" (the template's playlist line was left out: {ctx.topic} has no playlist in config/channel.yaml)"
+               if ctx.missing_playlist else "")
+        results.append(_result("link_back", "warn" if ctx.platform == "tiktok" else "block", body,
+                               "Nothing points back to the full video: add its link, the playlist or the channel "
+                               f"name{why}"))
+
+    for key, limit in LENGTH_LIMITS.get(ctx.platform, {}).items():
+        size = len(fields.get(key) or "")
+        if size > limit:
+            results.append(_result("length_limits", "block", key, f"{size} characters; the {name} limit is {limit}"))
+
+    if ctx.clip_limit_s and ctx.duration_s and ctx.duration_s > ctx.clip_limit_s + 1e-6:
+        results.append(_result("clip_length", "warn", "clip",
+                               f"The clip is {ctx.duration_s:.1f} s; {name} takes up to {ctx.clip_limit_s:g} s"))
+    else:
+        results.append(_result("clip_length", "pass", "clip", f"The clip fits {name}"))
+
+    for r in results:
+        r["dismissed"] = r["severity"] == "warn" and r["key"] in ctx.dismissed
+    return fields, results
 
 
 def blocked_fields(results: list[dict]) -> set[str]:

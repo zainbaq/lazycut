@@ -20,7 +20,7 @@ import { LIMITS, claimMarks, isBlocked, resultsFor, tagsLength } from "./rules";
 const btn = "ink-btn flex min-h-11 items-center justify-center gap-1.5 rounded-[10px] border border-line3 px-3 text-[12px] disabled:opacity-40";
 
 /** One package field as a copyable block: character count, its rule badges, inline edit, Regenerate. */
-function FieldBlock({
+export function FieldBlock({
   pkg,
   videoId,
   label,

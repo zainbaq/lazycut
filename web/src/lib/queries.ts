@@ -5,11 +5,16 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
 import type {
   Aspect,
+  Clip,
+  ClipFind,
+  ClipList,
+  ClipPatch,
   Fact,
   FactUpdate,
   Job,
   LibraryItem,
   LibraryItemInput,
+  NewClip,
   NewVideo,
   PackageEdit,
   PackageList,
@@ -18,6 +23,7 @@ import type {
   Research,
   ResearchEdit,
   ResearchRun,
+  ShortPlatform,
   ThumbAdjust,
   ThumbGenerate,
   Thumbnail,
@@ -41,6 +47,7 @@ export const keys = {
   allPackages: ["packages"] as const,
   library: ["library"] as const,
   thumbnails: (id: string) => ["thumbnails", id] as const,
+  clips: (id: string) => ["clips", id] as const,
   thumbSettings: ["thumb-settings"] as const,
   thumbEstimate: (models: string[], aspects: string[]) => ["thumb-estimate", models.join(","), aspects.join(",")] as const,
 };
@@ -486,5 +493,116 @@ export function useResetThumbSettings() {
   return useMutation({
     mutationFn: () => api.resetThumbSettings(),
     onSuccess: (s) => afterThumbSettings(qc, s),
+  });
+}
+
+// ---- clips (7.5, 7.6) ---------------------------------------------------------------
+
+export const useClips = (id: string, ready: boolean) =>
+  useQuery({ queryKey: keys.clips(id), queryFn: () => api.clips(id), enabled: ready });
+
+function putClip(qc: ReturnType<typeof useQueryClient>, videoId: string, clip: Clip) {
+  qc.setQueryData<ClipList>(keys.clips(videoId), (list) => {
+    if (!list) return list;
+    const known = list.clips.some((c) => c.id === clip.id);
+    const clips = known ? list.clips.map((c) => (c.id === clip.id ? clip : c)) : [...list.clips, clip];
+    return { ...list, clips: clips.sort((a, b) => a.t_start - b.t_start) };
+  });
+}
+
+/** A clip marked by hand (free). */
+export function useCreateClip(videoId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: NewClip) => api.createClip(videoId, body),
+    onSuccess: (clip) => putClip(qc, videoId, clip),
+  });
+}
+
+/** Trim, rename, select or reset a clip. Edges move at once and roll back on error; the server
+ * answers with the clip measured again (dead time, counts, the analysis note). */
+export function useUpdateClip(videoId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: ClipPatch }) => api.updateClip(id, body),
+    onMutate: async ({ id, body }) => {
+      await qc.cancelQueries({ queryKey: keys.clips(videoId) });
+      const before = qc.getQueryData<ClipList>(keys.clips(videoId));
+      qc.setQueryData<ClipList>(keys.clips(videoId), (list) =>
+        list
+          ? {
+              ...list,
+              clips: list.clips.map((c) => {
+                if (c.id !== id) return c;
+                const t_start = body.reset ? (c.orig_start ?? c.t_start) : (body.t_start ?? c.t_start);
+                const t_end = body.reset ? (c.orig_end ?? c.t_end) : (body.t_end ?? c.t_end);
+                return { ...c, ...("name" in body && body.name ? { name: body.name } : {}), t_start, t_end, duration_s: t_end - t_start };
+              }),
+            }
+          : list,
+      );
+      return { before };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.before) qc.setQueryData(keys.clips(videoId), context.before);
+    },
+    onSuccess: (clip) => {
+      putClip(qc, videoId, clip);
+      invalidatePackages(qc, videoId); // a short-form package follows its clip's range
+    },
+  });
+}
+
+export function useDeleteClip(videoId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteClip(id),
+    onSuccess: (_, id) => {
+      qc.setQueryData<ClipList>(keys.clips(videoId), (list) => (list ? { ...list, clips: list.clips.filter((c) => c.id !== id) } : list));
+      invalidatePackages(qc, videoId);
+    },
+  });
+}
+
+/** Ask the finder for clips: a small paid Claude call (none without a key). */
+export function useFindClips(videoId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: ClipFind) => api.findClips(videoId, body),
+    onSuccess: (job) => {
+      qc.setQueryData<Video>(keys.video(videoId), (v) => mergeJob(v, job));
+      qc.setQueryData<ClipList>(keys.clips(videoId), (list) => (list ? { ...list, finding: true } : list));
+    },
+  });
+}
+
+/** Export a clip with ffmpeg (free, no model call). The job's progress arrives on the live stream. */
+export function useExportClip(videoId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, crop, mode }: { id: string; crop: "none" | "9x16"; mode: "accurate" | "lossless" }) =>
+      api.exportClip(id, { crop, mode }),
+    onSuccess: (job) => qc.setQueryData<Video>(keys.video(videoId), (v) => mergeJob(v, job)),
+  });
+}
+
+/** Write a clip's short-form packages: one paid Claude call for all the platforms asked for. */
+export function useGenerateShort(videoId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ clipId, platforms }: { clipId: string; platforms: ShortPlatform[] }) => api.generateShort(videoId, clipId, platforms),
+    onSuccess: (job) => {
+      qc.setQueryData<Video>(keys.video(videoId), (v) => mergeJob(v, job));
+      qc.setQueryData<PackageList>(keys.packages(videoId), (p) => (p ? { ...p, running_short: true } : p));
+    },
+  });
+}
+
+/** Refine a clip's edges: two small paid Gemini calls. */
+export function useRefineClip(videoId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.refineClip(id),
+    onSuccess: (job) => qc.setQueryData<Video>(keys.video(videoId), (v) => mergeJob(v, job)),
   });
 }

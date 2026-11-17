@@ -94,6 +94,7 @@ function makeEdits(qc: QueryClient, videoId: string) {
     void qc.invalidateQueries({ queryKey: keys.video(videoId) });
     void qc.invalidateQueries({ queryKey: keys.videos });
     void qc.invalidateQueries({ queryKey: keys.packages(videoId) }); // events feed the stale check
+    void qc.invalidateQueries({ queryKey: keys.clips(videoId) }); // and what each clip counts and notes
   };
   const failed = (what: string, err: unknown) => {
     store().showToast({ text: `${what} failed: ${message(err)}`, error: true });

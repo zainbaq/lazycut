@@ -1,13 +1,19 @@
 "use client";
 
-import { AlertTriangle, Scissors } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo } from "react";
 
+import { ClipsPanel } from "@/components/clips/ClipsPanel";
+import { ExportMenu } from "@/components/clips/ExportMenu";
+import { LiftButton } from "@/components/clips/LiftButton";
+import { RefineButton } from "@/components/clips/RefineButton";
+import { SNAP_S } from "@/components/clips/trim";
+import { type ClipActions, useClipActions } from "@/components/clips/useClipActions";
 import { ConfigErrorCard, ErrorCard, SetupCard } from "@/components/ui/Cards";
 import { Rail } from "@/components/ui/Rail";
 import { ApiError } from "@/lib/api";
-import { useConfigStatus, useFacts, useFrames, usePresets, useRetryJob, useTimeline, useVideo } from "@/lib/queries";
+import { useClips, useConfigStatus, useFacts, useFrames, usePresets, useRetryJob, useTimeline, useVideo } from "@/lib/queries";
 import { type EventEdits, useEventEdits } from "@/lib/edits";
 import { useVideoUpdates } from "@/lib/sse";
 import { useWorkspace } from "@/lib/store";
@@ -24,7 +30,7 @@ import { Timeline } from "./Timeline";
 const BLOCKING = 'input, textarea, select, [contenteditable="true"], [role="slider"], [role="menu"], [role="menuitem"], [role="dialog"], [role="listbox"]';
 
 /** Keyboard shortcuts (9.6) for what exists in this step. Inactive in inputs, sliders, menus and dialogs. */
-function useShortcuts(events: TimelineEvent[], fps: number, edits: EventEdits) {
+function useShortcuts(events: TimelineEvent[], fps: number, edits: EventEdits, clipActions: ClipActions) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
@@ -47,7 +53,36 @@ function useShortcuts(events: TimelineEvent[], fps: number, edits: EventEdits) {
         case "Escape":
           if (review) ws.stopReview();
           else if (ws.selectedEventId) ws.select(null);
+          else if (ws.selectedClipId) ws.selectClip(null);
           else return;
+          break;
+        // Clips (9.6): in and out at the playhead, nudge the nearer edge, pick a clip by number.
+        case "i":
+        case "I":
+          if (review) return;
+          clipActions.mark("in");
+          break;
+        case "o":
+        case "O":
+          if (review) return;
+          clipActions.mark("out");
+          break;
+        case "[":
+        case "]":
+          if (review || !ws.selectedClipId) return;
+          clipActions.nudgeNearest(e.key === "[" ? -SNAP_S : SNAP_S);
+          break;
+        case "1":
+        case "2":
+        case "3":
+        case "4":
+        case "5":
+        case "6":
+        case "7":
+        case "8":
+        case "9":
+          if (review || !clipActions.clips()[Number(e.key) - 1]) return;
+          clipActions.selectIndex(Number(e.key) - 1);
           break;
         case "Enter": {
           // A focused button or link keeps Enter for itself; a focused chip means "verify this one".
@@ -124,20 +159,7 @@ function useShortcuts(events: TimelineEvent[], fps: number, edits: EventEdits) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [events, fps, edits]);
-}
-
-function ClipsStrip() {
-  return (
-    <div
-      aria-label="Clips (arrive in Phase 2)"
-      className="hidden w-11 shrink-0 flex-col items-center gap-3 border-r border-line py-4 text-fg4 min-[720px]:flex"
-      title="Clips arrive in Phase 2"
-    >
-      <Scissors aria-hidden="true" size={16} />
-      <span className="text-[11px] [writing-mode:vertical-rl]">Clips</span>
-    </div>
-  );
+  }, [events, fps, edits, clipActions]);
 }
 
 function jobTitle(job: Job): string {
@@ -156,6 +178,8 @@ export function Workspace({ id }: { id: string }) {
   const timeline = useTimeline(id, ready);
   const frames = useFrames(id, ready);
   const facts = useFacts(id, ready);
+  const clips = useClips(id, ready);
+  const clipActions = useClipActions(id, video.data?.duration_s ?? 0);
   const retry = useRetryJob(id);
   useVideoUpdates(id, video.isSuccess);
 
@@ -164,11 +188,19 @@ export function Workspace({ id }: { id: string }) {
   const initFilter = useWorkspace((s) => s.initFilter);
   const hiddenTypes = useWorkspace((s) => s.hiddenTypes);
   const showHidden = useWorkspace((s) => s.showHidden);
+  const selectedClipId = useWorkspace((s) => s.selectedClipId);
+  const selectedClip = selectedClipId ? clips.data?.clips.find((c) => c.id === selectedClipId) : undefined;
   const edits = useEventEdits(id);
 
   useEffect(() => {
     reset(id);
   }, [id, reset]);
+
+  // Which side panels were folded last time (read after mount: the server render has no storage).
+  const loadPanels = useWorkspace((s) => s.loadPanels);
+  useEffect(() => {
+    loadPanels();
+  }, [loadPanels]);
 
   useEffect(() => {
     if (!timeline.data || filterReady) return;
@@ -185,7 +217,7 @@ export function Workspace({ id }: { id: string }) {
     [showHidden, timeline.data?.events, hiddenTypes, visible],
   );
 
-  useShortcuts(visible, timeline.data?.fps ?? video.data?.fps ?? 30, edits);
+  useShortcuts(visible, timeline.data?.fps ?? video.data?.fps ?? 30, edits, clipActions);
 
   if (video.error) {
     const missing = video.error instanceof ApiError && video.error.status === 404;
@@ -220,7 +252,8 @@ export function Workspace({ id }: { id: string }) {
   }
 
   const v = video.data;
-  const failed = v.jobs.filter((j) => j.status === "error");
+  // Clip jobs report where they were started (the clips panel, the export menu), not as a card up here.
+  const failed = v.jobs.filter((j) => j.status === "error" && !j.kind.startsWith("clip"));
   const analysisJob = v.jobs.find((j) => j.kind === "analysis");
   const analyzing = analysisJob?.status === "running" || analysisJob?.status === "queued";
   const geminiReady = status.data ? status.data.keys.gemini : true;
@@ -267,10 +300,12 @@ export function Workspace({ id }: { id: string }) {
               </div>
             ) : null}
 
-            <div className="flex border-b border-line">
-              <ClipsStrip />
+            <div className="flex flex-col border-b border-line min-[720px]:flex-row">
               {ready ? (
-                <Preview video={v} events={visible} types={types} />
+                <ClipsPanel video={v} preset={preset} types={types} list={clips.data} loading={clips.isLoading} loadError={clips.error?.message ?? null} actions={clipActions} />
+              ) : null}
+              {ready ? (
+                <Preview video={v} events={visible} types={types} clips={clips.data?.clips ?? []} clipActions={clipActions} />
               ) : (
                 <section aria-label="Preview" className="flex flex-1 flex-col gap-2.5 p-4">
                   <span className="truncate text-[13px] font-semibold">{v.title}</span>
@@ -290,6 +325,17 @@ export function Workspace({ id }: { id: string }) {
                 shown={shown}
                 emptyNote={emptyNote}
                 edits={edits}
+                clips={clips.data?.clips ?? []}
+                clipActions={clipActions}
+                clipTools={
+                  selectedClip ? (
+                    <>
+                      <RefineButton video={v} clip={selectedClip} canRefine={!!clips.data?.can_refine} />
+                      <ExportMenu video={v} clip={selectedClip} />
+                      <LiftButton video={v} clip={selectedClip} />
+                    </>
+                  ) : null
+                }
               />
             ) : timeline.error ? (
               <div className="p-4">
@@ -311,6 +357,7 @@ export function Workspace({ id }: { id: string }) {
             factsLoading={ready && facts.isLoading}
             factsError={facts.error?.message ?? null}
             analyzed={!!v.analysis}
+            clipActions={clipActions}
           />
         </div>
       </div>

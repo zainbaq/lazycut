@@ -5,11 +5,15 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { AlertTriangle, ChevronDown, Circle, Minus, PackageOpen, Plus, ShieldCheck } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { AnalysisNote } from "@/components/clips/AnalysisNote";
+import type { ClipActions } from "@/components/clips/useClipActions";
 import { PackageSection } from "@/components/package/PackageSection";
 import { ResearchLink } from "@/components/research/ResearchLink";
+import { FoldButton, PanelStrip, usePanelFold } from "@/components/ui/PanelFold";
 import { Switch } from "@/components/ui/Switch";
 import { panelRise, stamp } from "@/lib/motion";
-import { useUpdateFact } from "@/lib/queries";
+import { useClips, useUpdateFact } from "@/lib/queries";
+import { useWorkspace } from "@/lib/store";
 import type { Fact, FactUpdate, FactValue, Preset, Video } from "@/lib/types";
 
 function show(value: FactValue): string {
@@ -300,7 +304,9 @@ export function PackagePanel({
   factsLoading,
   factsError,
   analyzed,
+  clipActions,
 }: {
+  clipActions: ClipActions;
   video: Video;
   preset: Preset | undefined;
   facts: Fact[] | undefined;
@@ -313,12 +319,31 @@ export function PackagePanel({
   const hasClaims = (preset?.facts ?? []).length > 0;
   const confirmed = (facts ?? []).filter((f) => f.confirmed).length;
   const requiredLeft = (facts ?? []).filter((f) => f.required && !f.confirmed);
+  const fold = usePanelFold("package");
+  // The analysis note lives in this panel; folded, the strip says when the selected clip has one.
+  const clips = useClips(videoId, video.status === "ready");
+  const selectedClipId = useWorkspace((s) => s.selectedClipId);
+  const hasNote = !!selectedClipId && !!clips.data?.clips.find((c) => c.id === selectedClipId)?.note;
   return (
     <aside
       aria-label="Package"
-      className="flex min-w-0 flex-col gap-3 border-t border-line bg-raised p-4 min-[1100px]:w-[300px] min-[1100px]:shrink-0 min-[1100px]:border-l min-[1100px]:border-t-0"
+      className={`flex min-w-0 flex-col border-t border-line bg-raised min-[1100px]:shrink-0 min-[1100px]:border-l min-[1100px]:border-t-0 ${fold.panelClass}`}
     >
-      <h2 className="font-head text-[16px]">Package</h2>
+      {fold.folded ? (
+        <PanelStrip
+          panel="package"
+          label="package"
+          title="Package"
+          dot={hasNote ? { tone: "warn", text: "a suggestion for the selected clip" } : null}
+          onOpen={fold.toggle}
+        />
+      ) : null}
+      {/* Folded, the content stays mounted so open sections and half-made edits are kept. */}
+      <div className={`${fold.folded ? "hidden" : "flex"} min-w-0 flex-1 flex-col gap-3 p-4 ${fold.bodyClass}`}>
+      <div className="flex items-center justify-between gap-1">
+        <h2 className="font-head text-[16px]">Package</h2>
+        <FoldButton panel="package" label="package" onFold={fold.toggle} />
+      </div>
       <Section
         icon={<ShieldCheck aria-hidden="true" size={14} className="text-accentsoft" />}
         title={hasClaims ? "Facts to confirm" : "Detected"}
@@ -362,6 +387,8 @@ export function PackagePanel({
       <Section icon={<PackageOpen aria-hidden="true" size={14} className="text-accentsoft" />} title="Platforms, title and rules">
         <PackageSection video={video} />
       </Section>
+      <AnalysisNote videoId={videoId} actions={clipActions} />
+      </div>
     </aside>
   );
 }

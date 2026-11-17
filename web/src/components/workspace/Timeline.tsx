@@ -6,12 +6,15 @@ import { Activity, BarChart3, EyeOff, Film, ListChecks, Minus, ZoomIn, ZoomOut }
 import { motion, useReducedMotion } from "motion/react";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
+import { ClipBar } from "@/components/clips/ClipBar";
+import { ClipBracket } from "@/components/clips/ClipBracket";
+import type { ClipActions } from "@/components/clips/useClipActions";
 import { apiUrl } from "@/lib/api";
 import type { EventEdits } from "@/lib/edits";
 import { clock } from "@/lib/format";
 import { markIn, PLAYHEAD_SEEK_CSS } from "@/lib/motion";
 import { useWorkspace } from "@/lib/store";
-import type { EventType, Frames, Timeline as TimelineData, TimelineEvent } from "@/lib/types";
+import type { Clip, EventType, Frames, Timeline as TimelineData, TimelineEvent } from "@/lib/types";
 
 import { reviewQueue } from "./actions";
 import { EventBar, EventMenuItems, eventState, menuContent } from "./EventActions";
@@ -271,13 +274,14 @@ function Filmstrip({ frames, pps }: { frames: Frames | undefined; pps: number })
   );
 }
 
-function Intensity({ data, pps, width }: { data: TimelineData; pps: number; width: number }) {
-  const { normal, dead } = useMemo(() => {
+function Intensity({ data, pps, width, clipStart, clipEnd }: { data: TimelineData; pps: number; width: number; clipStart?: number; clipEnd?: number }) {
+  const { normal, dead, inClip } = useMemo(() => {
     const colW = 3;
     const cols = Math.max(1, Math.floor(width / colW));
     const { bucket_s, scores } = data.intensity;
     let n = "";
     let d = "";
+    let c2 = "";
     for (let c = 0; c < cols; c++) {
       const t0 = (c * colW) / pps;
       const t1 = ((c + 1) * colW) / pps;
@@ -293,15 +297,19 @@ function Intensity({ data, pps, width }: { data: TimelineData; pps: number; widt
         d += `M${x} ${INTENSITY_H / 2 - 1.5}h2v3h-2z`;
       } else {
         const h = Math.max(3, Math.round(4 + v * 26));
-        n += `M${x} ${(INTENSITY_H - h) / 2}h2v${h}h-2z`;
+        const bar = `M${x} ${(INTENSITY_H - h) / 2}h2v${h}h-2z`;
+        // Bars inside the selected clip are brighter (9.4).
+        if (clipStart != null && clipEnd != null && tm >= clipStart && tm < clipEnd) c2 += bar;
+        else n += bar;
       }
     }
-    return { normal: n, dead: d };
-  }, [data, pps, width]);
+    return { normal: n, dead: d, inClip: c2 };
+  }, [data, pps, width, clipStart, clipEnd]);
   return (
     <svg aria-hidden="true" width={width} height={INTENSITY_H} className="block rounded-[8px] bg-surface">
       <path d={dead} fill="var(--line-2)" />
       <path d={normal} fill="var(--line-strong)" />
+      <path d={inClip} fill="var(--text-2)" />
     </svg>
   );
 }
@@ -415,7 +423,15 @@ export function Timeline({
   shown,
   emptyNote,
   edits,
+  clips,
+  clipActions,
+  clipTools,
 }: {
+  /** The video's clips; the selected one is bracketed on the filmstrip. */
+  clips: Clip[];
+  clipActions: ClipActions;
+  /** Extra controls at the end of the clip action bar (export, lift). */
+  clipTools?: React.ReactNode;
   data: TimelineData;
   frames: Frames | undefined;
   types: Map<string, EventType>;
@@ -438,6 +454,10 @@ export function Timeline({
   const startReview = useWorkspace((s) => s.startReview);
   const hiddenTypes = useWorkspace((s) => s.hiddenTypes);
   const dragging = useRef(false);
+  const selectedClipId = useWorkspace((s) => s.selectedClipId);
+  const clipDraft = useWorkspace((s) => s.clipDraft);
+  const clip = selectedClipId ? clips.find((c) => c.id === selectedClipId) : undefined;
+  const clipRange = clip ? (clipDraft && clipDraft.id === clip.id ? clipDraft : clip) : undefined;
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const [adding, setAdding] = useState<{ t: number } | null>(null);
   const typeList = data.event_types;
@@ -629,13 +649,30 @@ export function Timeline({
                 onClose={() => setAdding(null)}
               />
             </div>
-            <Filmstrip frames={frames} pps={pps} />
-            <Intensity data={data} pps={pps} width={width} />
+            <div className="relative" style={{ height: FILM_H }}>
+              <Filmstrip frames={frames} pps={pps} />
+              <ClipBracket
+                clip={clip}
+                others={clips.filter((c) => c.id !== selectedClipId)}
+                pps={pps}
+                duration={data.duration_s}
+                height={FILM_H}
+                timeAt={timeAt}
+                actions={clipActions}
+              />
+            </div>
+            <Intensity data={data} pps={pps} width={width} clipStart={clipRange?.t_start} clipEnd={clipRange?.t_end} />
             <DeadTime data={data} pps={pps} />
             <Playhead pps={pps} scroller={scroller} />
           </div>
         </div>
       </div>
+
+      {clip ? (
+        <ClipBar clip={clip} duration={data.duration_s} actions={clipActions}>
+          {clipTools}
+        </ClipBar>
+      ) : null}
 
       {/* One shared menu for right-click on a chip, anchored where the click was. */}
       <Dropdown.Root open={!!menuEvent} onOpenChange={(o) => (o ? undefined : setMenu(null))}>

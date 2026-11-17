@@ -2,6 +2,10 @@
 
 import type {
   Aspect,
+  Clip,
+  ClipFind,
+  ClipList,
+  ClipPatch,
   ConfigStatus,
   EventPatch,
   Fact,
@@ -11,6 +15,7 @@ import type {
   Job,
   LibraryItem,
   LibraryItemInput,
+  NewClip,
   NewEvent,
   NewVideo,
   Package,
@@ -23,6 +28,7 @@ import type {
   Research,
   ResearchEdit,
   ResearchRun,
+  ShortPlatform,
   ThumbAdjust,
   ThumbEstimate,
   ThumbGenerate,
@@ -119,6 +125,9 @@ export const api = {
   /** A paid Claude call. */
   generatePackage: (id: string) =>
     request<Job>(`/videos/${id}/packages`, { method: "POST", ...json({ platforms: ["youtube"] }) }),
+  /** A paid Claude call: one for all the platforms asked for. */
+  generateShort: (id: string, clipId: string, platforms: ShortPlatform[]) =>
+    request<Job>(`/videos/${id}/packages`, { method: "POST", ...json({ platforms, clip_id: clipId }) }),
   editPackage: (id: string, body: PackageEdit) => request<Package>(`/packages/${id}`, { method: "PATCH", ...json(body) }),
   /** A paid Claude call. */
   regeneratePackage: (id: string, body: PackageRegenerate) =>
@@ -131,6 +140,18 @@ export const api = {
   publish: (id: string, body: PublishBody) =>
     request<PublishedVideo>(`/videos/${id}/publish`, { method: "POST", ...json(body) }),
   unpublish: (id: string) => request<Video>(`/videos/${id}/publish`, { method: "DELETE" }),
+  // ---- clips (7.5, 7.6) ----
+  clips: (id: string) => request<ClipList>(`/videos/${id}/clips`),
+  createClip: (id: string, body: NewClip) => request<Clip>(`/videos/${id}/clips`, { method: "POST", ...json(body) }),
+  updateClip: (id: string, body: ClipPatch) => request<Clip>(`/clips/${id}`, { method: "PATCH", ...json(body) }),
+  deleteClip: (id: string) => request<void>(`/clips/${id}`, { method: "DELETE" }),
+  /** Two small paid Gemini calls: looks closely at the clip's first and closing event. */
+  refineClip: (id: string) => request<Job>(`/clips/${id}/refine`, { method: "POST" }),
+  /** Cut the clip from the source with ffmpeg (free). */
+  exportClip: (id: string, body: { crop: "none" | "9x16"; mode: "accurate" | "lossless" }) =>
+    request<Job>(`/clips/${id}/export`, { method: "POST", ...json(body) }),
+  /** One Claude text call on the stored timeline (free without a key: the timeline alone). */
+  findClips: (id: string, body: ClipFind) => request<Job>(`/videos/${id}/clips/find`, { method: "POST", ...json(body) }),
   // ---- thumbnails (7.13) ----
   thumbnails: (id: string) => request<ThumbnailState>(`/videos/${id}/thumbnails`),
   /** Scores frames in code, then a small paid Claude call ranks the best few. */

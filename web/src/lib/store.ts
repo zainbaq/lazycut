@@ -22,8 +22,23 @@ interface WorkspaceState {
   review: { ids: string[]; index: number; halfSpeed: boolean } | null;
   /** Event whose label is being renamed. */
   renamingId: string | null;
+  /** The clip being trimmed and looped; null plays the whole video. */
+  selectedClipId: string | null;
+  /** A clip's edges while one is being dragged, before the server has them. */
+  clipDraft: { id: string; t_start: number; t_end: number } | null;
+  /** The short-form platforms packages are written for (kept across videos in a session). */
+  shortPlatforms: { shorts: boolean; reels: boolean; tiktok: boolean };
+  toggleShortPlatform: (platform: "shorts" | "reels" | "tiktok") => void;
+  /** Side panels folded to a strip. Kept in this browser, across videos. */
+  folded: Record<PanelName, boolean>;
+  /** Off until the saved fold state is applied, so loading does not animate the panels. */
+  panelsAnimate: boolean;
+  loadPanels: () => void;
+  togglePanel: (panel: PanelName) => void;
 
   reset: (videoId: string) => void;
+  selectClip: (id: string | null) => void;
+  setClipDraft: (draft: { id: string; t_start: number; t_end: number } | null) => void;
   setShowHidden: (on: boolean) => void;
   startReview: (ids: string[]) => void;
   reviewGo: (index: number) => void;
@@ -45,6 +60,20 @@ interface WorkspaceState {
 
 let seekTimer: ReturnType<typeof setTimeout> | undefined;
 
+/** The workspace's two side panels: clips on the left, the package on the right. */
+export type PanelName = "clips" | "package";
+const PANELS_KEY = "lazycut.panels";
+
+// Storage can be blocked or empty (private window); the panels then just start open.
+function savedPanels(): Record<PanelName, boolean> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(PANELS_KEY) ?? "{}") as Partial<Record<PanelName, unknown>>;
+    return { clips: raw.clips === true, package: raw.package === true };
+  } catch {
+    return { clips: false, package: false };
+  }
+}
+
 export const useWorkspace = create<WorkspaceState>((set, get) => ({
   videoId: null,
   videoEl: null,
@@ -59,9 +88,32 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   crop916: false,
   review: null,
   renamingId: null,
+  selectedClipId: null,
+  clipDraft: null,
+  shortPlatforms: { shorts: true, reels: true, tiktok: false },
+  toggleShortPlatform: (platform) => set((s) => ({ shortPlatforms: { ...s.shortPlatforms, [platform]: !s.shortPlatforms[platform] } })),
+  folded: { clips: false, package: false },
+  panelsAnimate: false,
+  loadPanels: () => {
+    set({ folded: savedPanels() });
+    setTimeout(() => set({ panelsAnimate: true }), 50);
+  },
+  togglePanel: (panel) => {
+    const folded = { ...get().folded, [panel]: !get().folded[panel] };
+    set({ folded });
+    try {
+      localStorage.setItem(PANELS_KEY, JSON.stringify(folded));
+    } catch {
+      // Not saved; the choice still holds until the page reloads.
+    }
+  },
 
+  selectClip: (selectedClipId) => set({ selectedClipId, clipDraft: null }),
+  setClipDraft: (clipDraft) => set({ clipDraft }),
   reset: (videoId) =>
     set({
+      selectedClipId: null,
+      clipDraft: null,
       videoId,
       playhead: 0,
       playing: false,

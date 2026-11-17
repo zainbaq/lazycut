@@ -157,7 +157,8 @@ async def import_job(ctx: JobContext) -> None:
             s.add(video)
             if kind == "clip" and not s.exec(select(Clip).where(Clip.video_id == video.id)).first():
                 # A pre-trimmed clip is one ready-made clip spanning the whole video.
-                s.add(Clip(video_id=video.id, name=video.title, t_start=0.0, t_end=info.duration_s, status="selected"))
+                s.add(Clip(video_id=video.id, name=video.title, t_start=0.0, t_end=info.duration_s, status="selected",
+                           source="import", orig_start=0.0, orig_end=info.duration_s))
             s.commit()
     except Exception:
         with session(ctx.engine) as s:

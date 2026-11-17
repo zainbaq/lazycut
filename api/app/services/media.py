@@ -234,6 +234,104 @@ async def frame_at(src: Path, t: float, width: int, dest: Path) -> Path:
     return dest
 
 
+# -- clip export (BUILD_SPEC 7.6) -------------------------------------------------
+
+EXPORT_CRF = "16"  # near-lossless (D20)
+
+
+def vertical_size(text: str) -> tuple[int, int]:
+    """`EXPORT_VERTICAL_SIZE` ("1080x1920") as even width and height."""
+    try:
+        width, height = (int(part) for part in text.lower().split("x"))
+    except ValueError as exc:
+        raise MediaError(f"EXPORT_VERTICAL_SIZE must look like 1080x1920, not {text!r}") from exc
+    if width < 2 or height < 2 or width % 2 or height % 2:
+        raise MediaError(f"EXPORT_VERTICAL_SIZE needs even numbers, not {text!r}")
+    return width, height
+
+
+def export_command(src: Path, dest: Path, t_start: float, t_end: float, crop: str, mode: str,
+                   vertical: tuple[int, int] = (1080, 1920)) -> list[str]:
+    """The ffmpeg call for one export. Always cut from the source, at the source frame rate (D20).
+
+    accurate: re-encoded near-lossless, frame-exact edges. lossless: stream copy, so the cut
+    starts on the keyframe at or before `t_start`. 9x16: centre crop scaled to the platforms'
+    native size, so they do not rescale it a second time.
+    """
+    if mode not in ("accurate", "lossless") or crop not in ("none", "9x16"):
+        raise MediaError(f"unknown export: mode {mode!r}, crop {crop!r}")
+    if mode == "lossless" and crop != "none":
+        raise MediaError("A lossless export cannot be cropped: cropping needs a re-encode")
+    head = ["ffmpeg", "-hide_banner", "-nostdin", "-y", "-ss", f"{max(0.0, t_start):.3f}", "-to", f"{t_end:.3f}",
+            "-i", str(src), "-map", "0:v:0", "-map", "0:a:0?"]
+    if mode == "lossless":
+        return [*head, "-c", "copy", "-avoid_negative_ts", "make_zero", "-movflags", "+faststart", str(dest)]
+    filters = []
+    if crop == "9x16":
+        width, height = vertical
+        filters = ["-vf", f"crop=trunc(ih*9/16/2)*2:ih,scale={width}:{height}:flags=lanczos,setsar=1"]
+    return [*head, *filters, "-c:v", "libx264", "-crf", EXPORT_CRF, "-preset", "slow", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "256k", "-movflags", "+faststart", str(dest)]
+
+
+async def keyframe_at_or_before(src: Path, t: float, reach_s: float = 30.0) -> float | None:
+    """The time of the last keyframe at or before `t`: where a stream copy really starts."""
+    lo = max(0.0, t - reach_s)
+    out, _ = await _run(
+        "ffprobe", "-v", "error", "-select_streams", "v:0", "-skip_frame", "nokey",
+        "-show_entries", "frame=pts_time", "-of", "csv=p=0", "-read_intervals", f"{lo:.3f}%{t + 0.5:.3f}", str(src),
+    )
+    times = []
+    for line in out.split():
+        try:
+            times.append(float(line.strip().strip(",")))
+        except ValueError:
+            continue
+    before = [k for k in times if k <= t + 1e-3]
+    return max(before) if before else None
+
+
+async def export_clip(src: Path, dest: Path, t_start: float, t_end: float, crop: str = "none",
+                      mode: str = "accurate", vertical: tuple[int, int] = (1080, 1920),
+                      on_progress: Callable[[float], None] | None = None) -> dict:
+    """Cut one continuous range to `dest`. Returns what the file really holds:
+    `{width, height, fps, duration_s, size_bytes, real_start, real_end}`."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    partial = dest.with_name(f"{dest.stem}.{uuid.uuid4().hex[:8]}.part.mp4")
+    cmd = export_command(src, partial, t_start, t_end, crop, mode, vertical)
+    try:
+        if on_progress is None:
+            await _run(*cmd)
+        else:
+            await _run_with_progress(cmd, max(t_end - t_start, 0.1), on_progress)
+        info = await probe(partial)
+        partial.replace(dest)
+    finally:
+        partial.unlink(missing_ok=True)
+    real_start = t_start
+    if mode == "lossless":
+        key = await keyframe_at_or_before(src, t_start)
+        real_start = key if key is not None else t_start
+    return {
+        "width": info.width, "height": info.height, "fps": round(info.fps, 3), "duration_s": round(info.duration_s, 3),
+        "size_bytes": dest.stat().st_size, "real_start": round(real_start, 3),
+        "real_end": round(real_start + info.duration_s, 3) if mode == "lossless" else round(t_end, 3),
+    }
+
+
+async def cut_excerpt(src: Path, dest: Path, t_start: float, t_end: float, height: int = 720) -> Path:
+    """A short, small, silent cut of the source for the refine pass (7.3): frame-exact, at the
+    source frame rate, at most `height` px tall."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    await _run(
+        "ffmpeg", "-hide_banner", "-nostdin", "-y", "-ss", f"{max(0.0, t_start):.3f}", "-to", f"{t_end:.3f}",
+        "-i", str(src), "-map", "0:v:0", "-vf", f"scale=-2:'min({height},ih)'",
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-an",
+        "-movflags", "+faststart", str(dest),
+    )
+    return dest
+
+
 # -- scene scores ---------------------------------------------------------------
 
 _PTS = re.compile(r"pts_time:([0-9.]+)")

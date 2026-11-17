@@ -6,7 +6,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.db import init_db, make_engine
-from app.routers import config, events, jobs, library, packages, research, thumbnails, videos
+from app.routers import clips, config, events, jobs, library, packages, research, thumbnails, videos
+from app.services.clip_jobs import clip_export_job, clip_find_job, clip_package_job, clip_refine_job
 from app.services.higgsfield import Higgsfield
 from app.services.jobs import Bus, JobRunner
 from app.services.llm.anthropic import ClaudeProvider
@@ -63,6 +64,10 @@ async def lifespan(app: FastAPI):
     runner.register("package", package_job)
     runner.register("thumbnail_frames", thumb_frames_job)
     runner.register("thumbnail", thumbnail_job)
+    runner.register("clip_find", clip_find_job)
+    runner.register("clip_export", clip_export_job)
+    runner.register("clip_package", clip_package_job)
+    runner.register("clip_refine", clip_refine_job)
     runner.recover()
     app.state.engine, app.state.bus, app.state.runner = engine, bus, runner
     yield
@@ -82,6 +87,7 @@ app.include_router(config.router)
 app.include_router(videos.router)
 app.include_router(jobs.router)
 app.include_router(events.router)
+app.include_router(clips.router)
 app.include_router(research.router)
 app.include_router(packages.router)
 app.include_router(library.router)

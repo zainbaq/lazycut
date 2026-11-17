@@ -385,7 +385,7 @@ export interface Package {
   id: string;
   video_id: string;
   clip_id: string | null;
-  platform: "youtube";
+  platform: "youtube" | ShortPlatform;
   version: number;
   created_at: string;
   fields: PackageFields;
@@ -408,6 +408,8 @@ export interface PackageList {
   can_generate: boolean;
   /** A package job is queued or running. */
   running: boolean;
+  /** A short-form (clip) package is being written. */
+  running_short: boolean;
   packages: Package[];
 }
 
@@ -421,7 +423,10 @@ export type EditableField =
   | "pinned_comment"
   | "community_post"
   | "opening_5s"
-  | "chapters";
+  | "chapters"
+  | "on_screen_text"
+  | "caption"
+  | "end_text";
 
 /** `PATCH /packages/{id}`. */
 export type PackageEdit =
@@ -645,3 +650,116 @@ export interface ThumbEstimate {
   usd: number | null;
   error?: string;
 }
+
+// ---- clips (BUILD_SPEC 7.5, 7.6) ----
+
+export type ShortPlatform = "shorts" | "reels" | "tiktok";
+export type ClipStatus = "candidate" | "selected" | "exported";
+
+/** One suggestion for a clip. `apply` holds the edges that carry it out; null when it is advice only. */
+export interface ClipNote {
+  id: "too_long" | "late_start" | "dead_time" | "late_payoff" | "long_tail" | "crop" | "no_events";
+  message: string;
+  apply: { t_start?: number; t_end?: number } | null;
+  /** The stretch of the video the note is about, when it has one. */
+  at: [number, number] | null;
+}
+
+export interface ClipExport {
+  id: string;
+  clip_id: string;
+  crop: "none" | "9x16";
+  mode: "accurate" | "lossless";
+  width: number | null;
+  height: number | null;
+  fps: number | null;
+  t_start: number | null;
+  t_end: number | null;
+  /** What the file really holds: a lossless cut starts on a keyframe. */
+  real_start: number | null;
+  real_end: number | null;
+  duration_s: number | null;
+  size_bytes: number | null;
+  created_at: string;
+  url: string;
+}
+
+export interface Clip {
+  id: string;
+  video_id: string;
+  name: string;
+  t_start: number;
+  t_end: number;
+  duration_s: number;
+  prompt: string | null;
+  reason: string | null;
+  payoff_t: number | null;
+  /** The frame shown on the card: the payoff, or the middle. */
+  frame_t: number;
+  status: ClipStatus;
+  platform: ShortPlatform | null;
+  source: "finder" | "user" | "import";
+  orig_start: number | null;
+  orig_end: number | null;
+  /** The range differs from the one it was created with (Reset brings that back). */
+  edited: boolean;
+  dead_time_s: number;
+  dead_runs: { t_start: number; t_end: number }[];
+  event_counts: Record<string, number>;
+  crop_warning: boolean;
+  over_limit_s: number;
+  note: ClipNote | null;
+  exports: ClipExport[];
+  created_at: string;
+}
+
+export interface ClipList {
+  can_find: boolean;
+  /** A Gemini key is set, so edges can be refined. */
+  can_refine: boolean;
+  finding: boolean;
+  limits: { min_s: number; max_s: Record<ShortPlatform, number> };
+  clips: Clip[];
+}
+
+export interface NewClip {
+  t_start: number;
+  t_end: number;
+  name?: string;
+  platform?: ShortPlatform | null;
+}
+
+export type ClipPatch = Partial<Pick<Clip, "t_start" | "t_end" | "name" | "platform" | "payoff_t">> & {
+  status?: "candidate" | "selected";
+  reset?: boolean;
+};
+
+export interface ClipFind {
+  prompt: string;
+  platform: ShortPlatform;
+  target_len_s?: number | null;
+}
+
+/** A short-form package's fields (Shorts: title and description; Reels and TikTok: on-screen text and caption). */
+export interface ShortFields {
+  clip: { id: string; name: string; t_start: number; t_end: number };
+  title?: string;
+  description?: string;
+  on_screen_text?: string;
+  caption?: string;
+  question?: string;
+  end_text?: string;
+  hashtags: string[];
+  pinned_comment: string;
+  link_back: string;
+  hook_id: string | null;
+  slots: Record<string, string>;
+  goals: Record<string, Goal>;
+  safe_margins: { top_pct: number; bottom_pct: number };
+}
+
+export type ShortPackage = Omit<Package, "fields" | "platform" | "clip_id"> & {
+  platform: ShortPlatform;
+  clip_id: string;
+  fields: ShortFields;
+};

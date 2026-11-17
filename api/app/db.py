@@ -8,7 +8,7 @@ from sqlmodel import Session, SQLModel, create_engine
 
 from app import models  # noqa: F401 - registers the tables on SQLModel.metadata
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 def _add_event_edited(conn) -> None:
@@ -22,9 +22,32 @@ def _add_event_edited(conn) -> None:
         ))
 
 
+def _add_columns(conn, table: str, columns: dict[str, str]) -> None:
+    have = {row[1] for row in conn.execute(text(f"PRAGMA table_info({table})"))}
+    for name, ddl in columns.items():
+        if name not in have:
+            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
+
+
+def _add_clip_columns(conn) -> None:
+    """Phase 2: what clips and exports need beyond the columns declared in Phase 0."""
+    _add_columns(conn, "clip", {
+        "platform": "VARCHAR", "source": "VARCHAR NOT NULL DEFAULT 'user'",
+        "orig_start": "FLOAT", "orig_end": "FLOAT", "created_at": "VARCHAR NOT NULL DEFAULT ''",
+    })
+    # Clips stored before this version came from importing a pre-trimmed video (kind = clip).
+    conn.execute(text(
+        "UPDATE clip SET source = 'import', orig_start = t_start, orig_end = t_end WHERE orig_start IS NULL"
+    ))
+    _add_columns(conn, "clip_export", {
+        "t_start": "FLOAT", "t_end": "FLOAT", "real_start": "FLOAT", "real_end": "FLOAT",
+        "duration_s": "FLOAT", "size_bytes": "INTEGER",
+    })
+
+
 # version -> step that brings the schema from version - 1 to version. New tables come
 # from create_all; a step is only needed for a change to an existing table.
-MIGRATIONS: dict[int, Callable] = {3: _add_event_edited}
+MIGRATIONS: dict[int, Callable] = {3: _add_event_edited, 4: _add_clip_columns}
 
 
 def make_engine(db_path: Path) -> Engine:

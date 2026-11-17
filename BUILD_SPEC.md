@@ -1,6 +1,6 @@
 # LazyCut — Build Spec for Claude Code
 
-Date: 2026-11-14 (rev 2, after the spec review) · Owner: Zain · Status: Phase 0 closed on 2026-11-15; Phase 1 in progress (see section 10)
+Date: 2026-11-14 (rev 2, after the spec review) · Owner: Zain · Status: Phase 0 closed on 2026-11-15; Phase 1 in progress and Phase 2 (clips) built on 2026-11-16 (see section 10)
 
 Read this whole file before writing code. It is the single source of truth for scope, architecture, backend behaviour and frontend design. Where it says "verify", check the current vendor docs before relying on the detail.
 
@@ -139,9 +139,12 @@ lazycut/
           detectors/gauge.py  # reads an on-screen bar from pixels; needs a playbook region
           detectors/flash.py  # full-screen colour burst; needs a playbook entry
           merge.py            # detections -> events
+          refine.py           # one moment looked at closely (7.3); used by "Refine edges"
         playbook.py           # optional per-topic cues and screen regions
         analysis.py
-        clipfinder.py
+        clipfinder.py         # clip maths, the analysis note, the finder's prompt and resolvers (7.5)
+        clip_jobs.py          # clip_find, clip_export, clip_package and clip_refine jobs
+        short_packaging.py    # Shorts, Reels and TikTok packages (7.8)
         research.py
         packaging.py
         templates.py          # template variables and slots (7.8)
@@ -153,6 +156,8 @@ lazycut/
       eval_analysis.py        # scores analyses against the reviewed labels
       review_sheet.py         # builds the label review page and applies its answers
       gauge_probe.py          # Phase 0 probe; becomes detectors/gauge.py
+      clip_finder_probe.py    # Phase 2 probe: two ways to ask the finder, side by side
+      refine_probe.py         # Phase 2 probe: the refine pass against the reviewed labels
     tests/
   web/
     Dockerfile
@@ -251,8 +256,8 @@ Use string UUIDs for ids, UTC ISO timestamps, JSON columns for nested data. Open
 | `segment` | id, video_id, kind (`dead_time`\|`peak`\|`section`), t_start, t_end, label |
 | `intensity_sample` | video_id, t, score (0–1). One row per 0.5 s |
 | `fact` | id, video_id, key, label, value (JSON), proposed_value (JSON), confirmed (bool), evidence_ts (JSON), evidence_event_ids (JSON), confirmed_at |
-| `clip` | id, video_id, name, t_start, t_end, prompt, reason, payoff_t, dead_time_s, crop_warning, status (`candidate`\|`selected`\|`exported`) |
-| `clip_export` | id, clip_id, crop (`none`\|`9x16`), mode (`accurate`\|`lossless`), path, width, height, fps, created_at |
+| `clip` | id, video_id, name, t_start, t_end, prompt, reason, payoff_t (only when the finder or the user set it), dead_time_s, crop_warning, status (`candidate`\|`selected`\|`exported`), platform (`shorts`\|`reels`\|`tiktok`, nullable), source (`finder`\|`user`\|`import`), orig_start, orig_end (the range it was created with, for Reset), created_at |
+| `clip_export` | id, clip_id, crop (`none`\|`9x16`), mode (`accurate`\|`lossless`), path, width, height, fps, t_start, t_end (the range asked for), real_start, real_end (what the file holds; a lossless cut starts on a keyframe), duration_s, size_bytes, created_at |
 | `research` | id, subject_key, topic_key, kind (`subject`\|`competitors`), payload (JSON), overrides (JSON: fields the user changed), sources (JSON list of {title,url,credible}), created_at. Keys are the lower-cased, punctuation-stripped names, so a second video on the same subject reuses the row |
 | `package` | id, video_id, clip_id (nullable), platform (`youtube`\|`shorts`\|`reels`\|`tiktok`), fields (JSON), alternates (JSON), edited_fields (JSON list), rule_results (JSON), inputs_hash, version, created_at |
 | `job` | id, video_id, kind, status (`queued`\|`running`\|`done`\|`error`), progress (0–1), message, error, created_at, updated_at |
@@ -579,6 +584,10 @@ Purpose: the waveform row, dead-time detection and optional event snapping.
 3. **Visual snap (experimental, `EVENT_SNAP=visual`).** Move each model event to the largest spike in the per-frame scene scores within ±0.75 s, if one stands out. Keep the model's original time in `t_model_start`. Off by default; enable only if Phase 0 shows it helps.
 4. **Eye test.** The user reviews events in the timeline (9.4): move, retype, hide or verify each one. This is the final authority.
 
+**Refine pass as built (Phase 2; `services/events/refine.py`, experimental).** One stage with one job: given a time and a description, cut 6 s around it from the source (720p, source frame rate, no audio), sample it at 10 fps, and ask only for the moment; an answer outside the excerpt counts as not found. "Refine edges" on a clip (`clip_refine` job, two calls) looks at the clip's first event and at the end of its closing event, then puts the edges `lead_in_s` before and `tail_s` after what it saw. An edge whose moment is not found, or whose answer is more than 2 s away, is left alone, and the job's message says what happened to each edge. Refining a single event is not built.
+
+Measured on 2026-11-16 (`scripts/refine_probe.py`, five Gate Keeper counters, one run): each call read about 4.2k tokens and answered in 6 to 20 s. Against the owner-confirmed labels it was no better than the full pass (mean error 0.77 s against 0.51 s): every answer sat 0.5 to 1.0 s after the label. Against the picture it was precise: in four of the five, one of the three largest frame-to-frame changes lay within 0.1 s of its answer (the red burst at impact). So the labels and the refine pass seem to mark different instants of a counter (the first glint, the impact), and which one an event's time should mean is the owner's call (assumption 20). Until then the refine pass is not the default for anything and only runs when asked.
+
 If a video exceeds the limits even at 1 fps, split it into chunks with 5 s overlap and merge events (dedupe by type within 0.75 s).
 
 **Analysis output schema**
@@ -709,6 +718,17 @@ Input: free-text prompt, target platform, target length (optional).
 - The user nudges either edge in 0.5 s steps. Every change persists.
 - "Analysis note": one deterministic suggestion per selected clip, generated in code and re-evaluated whenever the edges change. Examples: first event lands more than 1.0 s after clip start (which happens after manual nudges, or when a range starts on dead time) → suggest starting later; payoff later than 7 s into a short → suggest an on-screen promise; dead time over 2 s inside the clip → show where.
 
+**As built (Phase 2; `services/clipfinder.py`, `services/clip_jobs.py`, `routers/clips.py`).**
+
+- **The model names events, code places the edges.** The finder prompt lists every visible event with an id (`e1`, `e2`, ...), the sections, the peak, the dead time and motion per 5 s. Claude answers each clip as `first_event`, `last_event` and `payoff_event` (or `start` / `end` for the video's own edges), a name and a reason. Code puts the start `lead_in_s` before the first event and the end `tail_s` after the last, so every candidate is snapped by construction and the model never does arithmetic on times. The spec's first draft (the model writes timestamps, code snaps them) is kept in the code as `times` mode for comparison.
+- **Measured on 2026-11-16** (`scripts/clip_finder_probe.py`; three videos, the presets' nine saved prompts, one run each, Reels, `claude-opus-5-5`; results in `eval/results/`): both modes gave only usable picks and the same first pick eight times out of nine. `times` lost 13 s of lead-up in one pick to the snap rule and cannot start a clip at 0:00; `anchors` has neither problem and is the default (`FINDER_MODE`). A run reads about 2.3k tokens, writes about 400 and takes about 5 s (1 to 2 cents at the same prices). Two weaknesses showed in both modes: for "Longest counter chain" the first pick was the finale (two counters and a hit) while denser runs came second and third; and a request for something the timeline lacks ("Phase change" on a fight with none) was answered with the nearest thing without saying so. The prompt now asks for a plain note in that case, and the job shows it.
+- **After the model:** each range is clamped (inside the video, at least 3 s, at most the platform's maximum, cut at the start instead of the end when the payoff sits at the end), and a candidate that shares more than 60 % of its footage with a better-ranked one is dropped (one angle per clip, Appendix A).
+- **Without an Anthropic key** the finder proposes "The ending", "Busiest stretch" and "The peak" from the timeline alone, and says the prompt was not read.
+- **Proposals and kept clips.** A clip is `candidate` until the user trims, renames, keeps, refines, exports or packages it; then it is `selected` (or `exported`). A new search replaces only the candidates. `Reset` returns a clip to the range it was created with (`orig_start`, `orig_end`).
+- **Platform maximums** used for clamping and the note: Shorts 180 s, Reels 180 s, TikTok 600 s (assumption 19).
+- **Clips by hand:** `POST /videos/{id}/clips` (the `I` and `O` keys). `payoff_t` is stored only when the finder or the user set it; otherwise the clip shows the payoff of its current range (its closing event, else its last strong event, else its last event).
+- **The analysis note,** first match wins: over the platform's length → trim; the first event more than 1.0 s after the start → start `lead_in_s` before it; more than 2 s of dead time inside → trim it when it touches an edge, else say where (a clip cannot be cut in the middle, D9); a payoff later than 7 s → promise it on screen; the clip running more than 1.0 s past its closing event's tail → end after it; an event a 9:16 crop may cut off; no events in range. "Apply recommendation" sends the edges the note carries.
+
 ### 7.6 Clip export (ffmpeg)
 
 Exports are cut from the source file, never the proxy, and keep the source frame rate (D20).
@@ -718,6 +738,8 @@ Exports are cut from the source file, never the proxy, and keep the source frame
 - **Lossless (uncropped only):** `-c copy`. No quality loss, but the edges snap to keyframes, so label it as approximate and show the real start and end.
 - Record each export in `clip_export` with its real dimensions and frame rate. Export to `data/media/<id>/clips/`. Also always offer "Copy timestamps".
 - Verify at build time which frame rates Shorts, Reels and TikTok keep; show a note if a platform will reduce 60 fps.
+
+**As built (Phase 2; `media.export_clip`, the `clip_export` job).** The three modes above, with `-ss` and `-to` on the input so the accurate cut is frame-exact (tested: 120 frames for 2 s at 60 fps, and the cut lands within one frame). The vertical size comes from `EXPORT_VERTICAL_SIZE`. A lossless export reports the keyframe it really starts on (`real_start`, found with ffprobe) and its real end; asking for lossless with a crop is refused. Files go to `data/media/<id>/clips/<clip_id>/`; a new export of the same crop and mode replaces the earlier one, and deleting the clip removes its files. The download is named `{Channel}_{Topic}_{Subject}_{Clip}_9x16.mp4`. An export made before the clip was trimmed again is marked as such in the export menu. Measured on Gate Keeper (1440p, 60 fps): 29.8 s to 1080×1920 took 58 s and gave 115 MB at CRF 16. Frame rates: the search on 2026-11-16 found no official statement, only third-party pages that disagree, so the note on a 60 fps vertical export says Shorts and TikTok play 60 fps and Reels may show 30, marked as unconfirmed (assumption 19).
 
 ### 7.7 Research
 
@@ -797,6 +819,19 @@ One generation call per platform, text model, JSON output, built from: channel p
 
 **TikTok:** starts from the Reel package, shortened. Conventions not yet established; keep fields the same as Reels.
 
+**Short-form as built (Phase 2; `services/short_packaging.py`, the `clip_package` job).**
+
+- **One writer call per clip, not per platform.** The call fills the slots the short-form templates use (boss fight: `plain_hook`, `what_happens`, `term_explained`, `tip`, `question`, `emoji`), picks an eligible hook or writes a claim-free phrase for `{hook}`, and returns a Shorts title, about eight hashtags and a pinned-comment line. Code renders every platform switched on from that one answer, so the three agree and a second platform costs nothing. Measured on Gate Keeper: one call for Shorts and Reels read 2.1k tokens, wrote 0.9k and took 11 s, about 2 cents at the prices behind the long-form call's $0.05 (logged in `llm_call`, purpose `package_short`).
+- **The writer is told about the clip only:** its name, length and reason, where the payoff lands, and its events in seconds from the clip's start. Confirmed facts are passed as facts about the whole video, with the warning that a count for the video is not a count for the clip.
+- **Shorts:** `title` (the writer's, at most 60 characters with one emoji; code adds the topic hashtag when it fits in 100), `description` from `templates.shorts_description`, hashtags with the channel's required one first.
+- **Reels:** the rendered `templates.reel` is split in code: the `ON-SCREEN:` line becomes `on_screen_text`; the rest, with the `CAPTION:` label removed, is the paste-ready `caption` (question, link back and hashtags included). `end_text` comes from `templates.reel_end_text`.
+- **TikTok:** the same text as the Reel (not shortened: there is no convention to shorten it by), with its own hashtag count and limits, and `link_back` only a warning.
+- **Hashtags:** all of the writer's are kept until the rules have removed bare ambiguous names, and only then cut to the platform's count, so a dropped one does not leave the package short. Editing the hashtags rewrites the line of hashtags inside the description or caption.
+- **Rows:** one `package` row per clip and platform. `inputs_hash` is the long-form hash plus the clip's range, so trimming a clip marks its packages "Out of date". Edits, regeneration (all, or one field) and dismissals work as for long-form. Writing a package makes a proposal a kept clip. Deleting a clip deletes its packages.
+- **Preview:** a phone frame showing the centre crop of the clip's payoff frame, the `vertical_safe_margins` guides, the on-screen text inside them and the end text. The app draws no text into the video.
+- **"Lift clip"** exports the clip at 9:16 (unless an export of its current range exists) and writes the packages still missing or out of date for the platforms switched on; it reads "Clip lifted" when both are current.
+- **Markdown export:** each clip's short-form packages follow the long-form package.
+
 Every recommendation carries a `goal` tag, one of: `click_through`, `retention`, `session_watch_time`, `engagement`, `funnel`. Show it as a small chip.
 
 Regeneration and edits:
@@ -833,6 +868,8 @@ Pure Python, deterministic, no LLM. Runs after every generation and every manual
 | `length_limits` | Per-platform character limits from a config table (verify limits at build time) | block |
 
 Preset `claim_rules` are evaluated by `claim_needs_fact`. Match phrases case-insensitively on word boundaries. As built, `claim_needs_fact` also checks the description (written from slots), since a slot could carry a claim. `canonical_spelling` rewrites any spelling of the researched name (case, spaces, hyphens) to the canonical one. Auto-fixes report `fixed: true` with what changed; `length_limits` uses title 100, description 5,000 and tags 500 characters (tags counted with separators, a tag with a space as if quoted); an alternate title over 100 characters gets a warn, since it cannot be picked as the title.
+
+Short-form as built (`rules.check_short`, Phase 2): `canonical_spelling` (not inside hashtags), `hashtag_count` (the platform's count; `#Shorts` is added on Shorts), `ambiguous_names`, `claim_needs_fact` and `number_needs_fact` on the Shorts title, the on-screen text and the end text (claims also on the description, caption and pinned comment; numbers are not checked in running text), `link_back` (the description or caption names the full video's link, the topic's playlist or the channel; when the template's playlist line was dropped because the topic has no playlist, the message says so), `length_limits` (Shorts title 100 and description 5,000; Reels and TikTok caption 2,200, the lower of the figures found, assumption 19) and `clip_length` (warn when the clip is longer than the platform takes).
 
 Not rules:
 
@@ -984,16 +1021,18 @@ Served at the root of `http://localhost:8000`. JSON unless noted. All list endpo
 | GET | `/videos/{id}/facts` | Facts with proposals |
 | PUT | `/facts/{id}` | Set value and confirm / unconfirm |
 | POST | `/videos/{id}/clips/find` | `{prompt, platform, target_len_s}` → candidates |
-| GET | `/videos/{id}/clips` | All clips |
-| PATCH | `/clips/{id}` | Nudge edges, rename, select |
-| POST | `/clips/{id}/refine` | Refine edges with a narrow high-rate pass |
+| GET | `/videos/{id}/clips` | All clips, each measured against the events (counts, dead time, the analysis note, its exports), plus whether the finder and the refine pass can run |
+| POST | `/videos/{id}/clips` | `{t_start, t_end, name?, platform?}` → a clip marked by hand (Phase 2 addition) |
+| PATCH | `/clips/{id}` | Nudge edges, rename, keep or stop keeping, set the payoff, `{reset: true}` |
+| DELETE | `/clips/{id}` | Remove the clip, its exports and its packages (Phase 2 addition) |
+| POST | `/clips/{id}/refine` | Refine edges with a narrow high-rate pass → job |
 | POST | `/clips/{id}/export` | `{crop: none\|9x16, mode: accurate\|lossless}` → job |
 | GET | `/exports/{id}/download` | Exported file |
 | POST | `/videos/{id}/research` | Run subject research (`{}` searches; `{pasted_text, source_url?}` sorts the user's notes). Competitor research joins in Phase 3 |
 | GET | `/videos/{id}/research` | Latest results with sources and effective values |
 | PATCH | `/videos/{id}/research` | `{key, value}` sets a field override; `{key, restore: true}` clears it |
 | POST | `/videos/{id}/research/revert-spelling` | Undo the subject spelling correction |
-| POST | `/videos/{id}/packages` | `{platforms: [...], clip_id?}` → generate (Phase 1: `youtube` only) |
+| POST | `/videos/{id}/packages` | `{platforms: [...], clip_id?}` → generate. Without `clip_id`: the YouTube long-form package. With it: the short-form platforms listed, in one writer call |
 | GET | `/videos/{id}/packages` | Latest package per platform (and per clip), with stale state, plus whether generation is possible and which required facts are missing |
 | PATCH | `/packages/{id}` | Manual field edit → re-run rules; or dismiss / undismiss a warning |
 | POST | `/packages/{id}/regenerate` | `{field}` or `{all: true, replace_edits: false}` |
@@ -1012,7 +1051,7 @@ Served at the root of `http://localhost:8000`. JSON unless noted. All list endpo
 | GET | `/jobs/{id}` · POST `/jobs/{id}/retry` | Job status / retry |
 | GET | `/videos/{id}/updates` | SSE: job progress and incremental results |
 
-SSE event types: `job.progress`, `job.done`, `job.error`, `analysis.event` (one per timeline event, sent in time order after the analysis call returns), `clip.candidate`, `package.field`, `thumbnail.updated` (one thumbnail row), `thumbnail.frames` (the frame finder's result). On page load the client fetches current state first and then subscribes; the stream carries no history.
+SSE event types: `job.progress`, `job.done`, `job.error`, `analysis.event` (one per timeline event, sent in time order after the analysis call returns), `clip.candidate` (one `Clip` per finder proposal, as they are stored), `package.field` (not used so far), `thumbnail.updated` (one thumbnail row), `thumbnail.frames` (the frame finder's result). On page load the client fetches current state first and then subscribes; the stream carries no history.
 
 Markdown export filename: `{Channel}_{Topic}_{Subject}_YouTube_SEO.md`, with spaces and the characters `< > : " / \ | ? *` removed so the name is valid on Windows.
 
@@ -1149,6 +1188,8 @@ Widths at 1440: rail 60, clips panel ~260, right panel ~300, centre flexible. Be
 
 **Phase 1 workspace.** There are no clips yet. The clips panel is collapsed to a narrow strip, the action bar is hidden and the filmstrip has no range bracket. The package panel and the full-package drawer carry the long-form flow.
 
+**Phase 2 workspace (as built).** The clips panel is open: the prompt with the saved prompts as chips, a platform and a length picker, the two-column grid, and under it the selected clip's reason and event counts. A kept clip carries a pin; a new search replaces only the proposals. Selecting a clip seeks to its start, loops it in the preview, brackets it on the filmstrip (drag an edge: 0.5 s snap, Alt for 0.1 s; the preview shows the frame under the edge) and shows the action bar: Reset, the four nudges, Copy timestamps, Refine edges, Export and "Lift clip". The Platforms switches for Shorts, Reels and TikTok work once a clip is selected, and its short-form packages sit under the long-form package in the package panel, each with Copy and Open (the drawer with the phone preview). The analysis note is pinned to the bottom of the package panel. Keys: `I` / `O`, `[` / `]`, `1–9`, and `Esc` to go back to the whole video. Both side panels fold to a 52 px strip from a button in their header (the strip shows the panel's name, the clip count, and a dot while the finder runs or while the selected clip has an analysis note); the choice is kept in the browser's storage across videos, and below each panel's breakpoint the strip is a row. Known rough edge: on a short window the pinned note can cover the last rows of the package panel until the panel is scrolled to its end.
+
 ### 9.5 Motion spec
 
 Use these as shared presets in `lib/motion.ts`.
@@ -1243,10 +1284,21 @@ Build in this order; each step is usable on its own.
 - *Done when:* one boss fight and one General video each go from import to a copied, rule-checked long-form package with real chapter timestamps, without leaving the app.
 
 **Phase 2 — Clips**
+
+Status on 2026-11-16: built, in six steps that each work on their own. The "done when" was run in the app on Gate Keeper: the finder proposed four clips, one was trimmed by 0.5 s, exported at 1080×1920 and 60 fps (29.3 s, 113 MB, about a minute) and given its Reels and Shorts packages with one press of "Lift clip". Schema version 4 adds the clip and export columns in section 4. As built: 7.3 (refine), 7.5, 7.6, 7.8, 7.9, section 8 and 9.4.
+
+1. Clips by hand: mark with `I` and `O`, drag or nudge the edges, the looping preview, the analysis note.
+2. Clip finder (7.5): a prompt or a saved prompt gives 3 to 5 candidates.
+3. Export (7.6): frame-exact, lossless and 9:16.
+4. Shorts, Reels and TikTok packages (7.8) with the phone-frame preview, and "Lift clip".
+5. Refine edges (7.3). Experimental: see the measurement in 7.3.
+6. The end-to-end run and the documents.
+
 - Clip finder, candidates grid, selection, nudge, draggable edges, analysis note, refine pass.
 - ffmpeg export (accurate and lossless, 9:16 at 1080×1920, source frame rate).
 - Shorts, Reels and TikTok packages; platform previews.
 - *Done when:* a Reel is chosen, trimmed, exported and captioned from a full video in one sitting.
+- Not built: refining a single event (`POST /events/{id}/refine`); the `clip.candidate` stream is used, `package.field` is not.
 
 **Phase 3 — Research, thumbnails and imports**
 - Competitor research with YouTube Data API and caching; gap analysis; cannibalization.
@@ -1307,6 +1359,11 @@ Build in this order; each step is usable on its own.
 16. Search demand comes from YouTube's unofficial suggestion endpoint (7.7.1). It can change or stop without notice; the app then falls back to the writer's choices. A suggestion's rank is a popularity signal, not search volume.
 17. On a search-first channel, code overrides the writer's title pick with the best search score. The owner can always pick another title; the `search_demand` rule warns when an edit drops every top phrase.
 18. The default thumbnail model is Grok Image 2.0, picked from one comparison on 2026-11-16: the same Gate Keeper frame (0:10), the same preset prompt, 16:9, all four models. Grok ($0.09) kept the boss and player most faithful and removed all HUD. Qwen Image 3 Edit ($0.075) also passed and added moodier light; it is the cheaper alternative. Marketing Studio ($0.265) gave the most cinematic golden-hour look at three times the price. Ideogram 4.0 ($0.10) failed: it repainted the HUD and boss name and recoloured the bronze mask gold. One frame is a small sample, so recompare on a different game. Prices come from Higgsfield's estimate endpoint, and no per-image price is published.
+19. Short-form platform facts are not confirmed. A search on 2026-11-16 found no official page, only third-party ones that disagree. Used until the owner corrects them: maximum length Shorts 180 s, Reels 180 s (other pages say 90 s, or longer), TikTok 600 s; caption limit 2,200 characters for Reels and for TikTok (other pages say 4,000 for TikTok); Shorts title 100 and description 5,000; Shorts and TikTok play 60 fps and Reels may show 30 fps. The lengths are in `clipfinder.PLATFORM_MAX_S`, the text limits in `rules.LENGTH_LIMITS`.
+20. An event's time is where the full pass put it. The refine pass answers 0.5 to 1.0 s later for counters, on the impact burst rather than the first glint the reviewed labels mark (7.3). Whether event times should mean the impact is open; until the owner decides, "Refine edges" is offered as experimental and nothing uses the refine pass by default.
+21. The short-form packages of a clip are written in one Claude call for every platform switched on, not one call per platform (7.8). The Phase 2 plan proposed it and the owner's go-ahead did not comment on it, so it is not yet confirmed; it can be changed back.
+22. The Shorts description template of the boss-fight preset links the topic's playlist. For a topic with no playlist in `config/channel.yaml` that line is dropped and the `link_back` rule blocks the description until a playlist is added or the text is edited (seen on Phantom Blade Zero).
+23. The boss-fight slot `plain_hook` asks for on-screen text "with a number". With only `hits_taken` confirmed, the writer used it: the Gate Keeper Reel's on-screen text opened with "Took 11 hits all fight". It is true and it passed the rules, but the owner may want that instruction reworded.
 
 ---
 

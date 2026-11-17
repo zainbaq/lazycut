@@ -113,6 +113,8 @@ class Fact(SQLModel, table=True):
 
 
 class Clip(SQLModel, table=True):
+    """One continuous range of a video (D9): start and end only, never a cut in the middle."""
+
     id: str = Field(default_factory=new_id, primary_key=True)
     video_id: str = Field(foreign_key="video.id", index=True, ondelete="CASCADE")
     name: str = ""
@@ -123,7 +125,13 @@ class Clip(SQLModel, table=True):
     payoff_t: float | None = None
     dead_time_s: float | None = None
     crop_warning: bool = False
-    status: str = "candidate"  # candidate | selected | exported
+    status: str = "candidate"  # candidate (a finder proposal nobody touched) | selected | exported
+    platform: str | None = None  # shorts | reels | tiktok: the platform it was found or trimmed for
+    source: str = "user"  # finder | user | import
+    # The range it was created with, for Reset.
+    orig_start: float | None = None
+    orig_end: float | None = None
+    created_at: str = Field(default_factory=utc_now)
 
 
 class ClipExport(SQLModel, table=True):
@@ -137,6 +145,13 @@ class ClipExport(SQLModel, table=True):
     width: int | None = None
     height: int | None = None
     fps: float | None = None
+    # The range asked for, and what the file really holds (lossless cuts snap to keyframes, 7.6).
+    t_start: float | None = None
+    t_end: float | None = None
+    real_start: float | None = None
+    real_end: float | None = None
+    duration_s: float | None = None
+    size_bytes: int | None = None
     created_at: str = Field(default_factory=utc_now)
 
 
